@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { queryWithRetry, type TodoRow } from "../db.js";
+import { dateString, formatDate } from "../lib/date.js";
 import { requireAccessKey } from "../middleware/access-key.js";
 
 const timeString = z
@@ -34,6 +35,7 @@ function scheduleRefine<T extends {
 const createSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
+    date_key: dateString.optional(),
     page_key: z.string().trim().min(1).max(64).optional(),
     scheduled_start: timeString.optional(),
     scheduled_end: timeString.optional(),
@@ -67,6 +69,7 @@ const patchSchema = z
 const listQuerySchema = z.object({
   status: z.enum(["all", "active", "done"]).default("all"),
   page_key: z.string().trim().min(1).max(64).optional(),
+  date: dateString.optional(),
 });
 
 function formatTime(value: string | Date | null): string | null {
@@ -85,6 +88,7 @@ function mapTodo(row: TodoRow) {
     id: row.id,
     title: row.title,
     isDone: row.is_done,
+    dateKey: formatDate(row.date_key),
     pageKey: row.page_key,
     sortOrder: row.sort_order,
     scheduledStart: formatTime(row.scheduled_start),
@@ -114,6 +118,10 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
       params.push(query.data.page_key);
       clauses.push(`page_key = $${params.length}`);
     }
+    if (query.data.date) {
+      params.push(query.data.date);
+      clauses.push(`date_key = $${params.length}`);
+    }
 
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
@@ -123,6 +131,7 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
           id,
           title,
           is_done,
+          date_key::text AS date_key,
           page_key,
           sort_order,
           scheduled_start::text AS scheduled_start,
@@ -154,6 +163,7 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
 
     const id = randomUUID();
     const title = parsed.data.title;
+    const dateKey = parsed.data.date_key ?? null;
     const pageKey = parsed.data.page_key ?? "inbox";
     const scheduledStart = parsed.data.scheduled_start ?? null;
     const scheduledEnd = parsed.data.scheduled_end ?? null;
@@ -161,15 +171,15 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
 
     const result = await queryWithRetry<TodoRow>(
       `
-        INSERT INTO todos (id, title, page_key, scheduled_start, scheduled_end, notes)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO todos (id, title, page_key, scheduled_start, scheduled_end, notes, date_key)
+        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, CURRENT_DATE))
         RETURNING
-          id, title, is_done, page_key, sort_order,
+          id, title, is_done, date_key::text AS date_key, page_key, sort_order,
           scheduled_start::text AS scheduled_start,
           scheduled_end::text AS scheduled_end,
           notes, created_at, updated_at, completed_at
       `,
-      [id, title, pageKey, scheduledStart, scheduledEnd, notes],
+      [id, title, pageKey, scheduledStart, scheduledEnd, notes, dateKey],
     );
 
     return reply.code(201).send(mapTodo(result.rows[0]));
@@ -189,7 +199,7 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
     const existing = await queryWithRetry<TodoRow>(
       `
         SELECT
-          id, title, is_done, page_key, sort_order,
+          id, title, is_done, date_key::text AS date_key, page_key, sort_order,
           scheduled_start::text AS scheduled_start,
           scheduled_end::text AS scheduled_end,
           notes, created_at, updated_at, completed_at
@@ -250,7 +260,7 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
             updated_at = NOW()
         WHERE id = $1
         RETURNING
-          id, title, is_done, page_key, sort_order,
+          id, title, is_done, date_key::text AS date_key, page_key, sort_order,
           scheduled_start::text AS scheduled_start,
           scheduled_end::text AS scheduled_end,
           notes, created_at, updated_at, completed_at

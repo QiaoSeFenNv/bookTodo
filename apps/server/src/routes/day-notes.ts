@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { queryWithRetry } from "../db.js";
+import { dateString, formatDate } from "../lib/date.js";
 import { requireAccessKey } from "../middleware/access-key.js";
 
 type DayNotesRow = {
@@ -11,35 +12,12 @@ type DayNotesRow = {
   updated_at: Date;
 };
 
-function isCalendarDate(value: string): boolean {
-  const [year, month, day] = value.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
-}
-
-const dateString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "invalid_date")
-  .refine(isCalendarDate, "invalid_date");
-
 const putSchema = z.object({
   date: dateString,
   summary: z.string().max(2000).optional(),
   goals: z.string().max(2000).optional(),
   notes: z.string().max(4000).optional(),
 });
-
-function formatDate(value: string | Date): string {
-  if (typeof value === "string") return value.slice(0, 10);
-  const y = value.getFullYear();
-  const m = String(value.getMonth() + 1).padStart(2, "0");
-  const d = String(value.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
 
 function mapNotes(row: DayNotesRow) {
   return {

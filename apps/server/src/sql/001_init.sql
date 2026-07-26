@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS todos (
   is_done BOOLEAN NOT NULL DEFAULT FALSE,
   page_key TEXT NOT NULL DEFAULT 'inbox',
   sort_order INT NOT NULL DEFAULT 0,
+  date_key DATE NOT NULL DEFAULT CURRENT_DATE,
   scheduled_start TIME NULL,
   scheduled_end TIME NULL,
   notes TEXT NULL,
@@ -12,12 +13,20 @@ CREATE TABLE IF NOT EXISTS todos (
   completed_at TIMESTAMPTZ NULL
 );
 
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS date_key DATE NULL;
+UPDATE todos SET date_key = CURRENT_DATE WHERE date_key IS NULL;
+ALTER TABLE todos ALTER COLUMN date_key SET DEFAULT CURRENT_DATE;
+ALTER TABLE todos ALTER COLUMN date_key SET NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_todos_status_sort
   ON todos (is_done, sort_order, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_todos_schedule
   ON todos (scheduled_start, sort_order)
   WHERE scheduled_start IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_todos_date_schedule_sort
+  ON todos (date_key, scheduled_start, sort_order);
 
 CREATE TABLE IF NOT EXISTS user_prefs (
   id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),

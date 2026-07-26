@@ -2,6 +2,7 @@ export type Todo = {
   id: string;
   title: string;
   isDone: boolean;
+  dateKey: string;
   pageKey: string;
   sortOrder: number;
   scheduledStart: string | null;
@@ -23,6 +24,7 @@ export type UserPrefs = {
 
 export type CreateTodoInput = {
   title: string;
+  dateKey?: string;
   pageKey?: string;
   scheduledStart?: string;
   scheduledEnd?: string;
@@ -91,9 +93,16 @@ export function verifyAccessKey(accessKey: string) {
   });
 }
 
-export function listTodos(accessKey: string, status: TodoFilter = "all") {
-  const query = status === "all" ? "" : `?status=${status}`;
-  return request<{ items: Todo[] }>(`/api/todos${query}`, {
+export function listTodos(
+  accessKey: string,
+  status: TodoFilter = "all",
+  date?: string,
+) {
+  const query = new URLSearchParams();
+  if (status !== "all") query.set("status", status);
+  if (date) query.set("date", date);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return request<{ items: Todo[] }>(`/api/todos${suffix}`, {
     method: "GET",
     accessKey,
   });
@@ -105,6 +114,7 @@ export function createTodo(accessKey: string, input: CreateTodoInput | string) {
       ? { title: input }
       : {
           title: input.title,
+          date_key: input.dateKey,
           page_key: input.pageKey,
           scheduled_start: input.scheduledStart,
           scheduled_end: input.scheduledEnd,
@@ -137,6 +147,13 @@ export function updateTodo(accessKey: string, id: string, patch: UpdateTodoInput
 export function deleteTodo(accessKey: string, id: string) {
   return request<void>(`/api/todos/${id}`, {
     method: "DELETE",
+    accessKey,
+  });
+}
+
+export function listAvailableDays(accessKey: string) {
+  return request<{ dates: string[] }>("/api/days", {
+    method: "GET",
     accessKey,
   });
 }

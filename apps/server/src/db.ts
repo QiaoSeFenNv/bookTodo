@@ -19,6 +19,7 @@ export type TodoRow = {
   id: string;
   title: string;
   is_done: boolean;
+  date_key: string | Date;
   page_key: string;
   sort_order: number;
   scheduled_start: string | Date | null;
@@ -100,6 +101,10 @@ export async function ensureSchema(): Promise<void> {
         ALTER TABLE todos ADD COLUMN IF NOT EXISTS scheduled_start TIME NULL;
         ALTER TABLE todos ADD COLUMN IF NOT EXISTS scheduled_end TIME NULL;
         ALTER TABLE todos ADD COLUMN IF NOT EXISTS notes TEXT NULL;
+        ALTER TABLE todos ADD COLUMN IF NOT EXISTS date_key DATE NULL;
+        UPDATE todos SET date_key = CURRENT_DATE WHERE date_key IS NULL;
+        ALTER TABLE todos ALTER COLUMN date_key SET DEFAULT CURRENT_DATE;
+        ALTER TABLE todos ALTER COLUMN date_key SET NOT NULL;
 
         CREATE INDEX IF NOT EXISTS idx_todos_status_sort
           ON todos (is_done, sort_order, created_at DESC);
@@ -107,6 +112,9 @@ export async function ensureSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_todos_schedule
           ON todos (scheduled_start, sort_order)
           WHERE scheduled_start IS NOT NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_todos_date_schedule_sort
+          ON todos (date_key, scheduled_start, sort_order);
 
         CREATE TABLE IF NOT EXISTS user_prefs (
           id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),

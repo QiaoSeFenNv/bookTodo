@@ -7,6 +7,7 @@ import { env, paths } from "./config.js";
 import { ensureSchema, pingDb } from "./db.js";
 import { authRoutes } from "./routes/auth.js";
 import { dayNotesRoutes } from "./routes/day-notes.js";
+import { dayIndexRoutes } from "./routes/days.js";
 import { prefsRoutes } from "./routes/prefs.js";
 import { todoRoutes } from "./routes/todos.js";
 
@@ -43,6 +44,7 @@ async function buildServer() {
   await app.register(todoRoutes);
   await app.register(prefsRoutes);
   await app.register(dayNotesRoutes);
+  await app.register(dayIndexRoutes);
 
   const webDistExists = fs.existsSync(path.join(paths.webDist, "index.html"));
   if (webDistExists) {

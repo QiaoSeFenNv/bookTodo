@@ -1,0 +1,7 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend quality checklist entry point."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Accessibility, responsive, gesture, and browser review criteria."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Review selected-date and API contract safety."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend quality checklist entry point."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend build and regression expectations."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review additive schema and date-index consistency."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify per-date data survives the complete round trip without leakage."}

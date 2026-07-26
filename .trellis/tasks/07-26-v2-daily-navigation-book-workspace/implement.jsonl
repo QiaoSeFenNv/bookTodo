@@ -1,0 +1,10 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend entry point for the date-aware workspace and custom picker."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Component composition and accessibility conventions for TimePicker and navigation controls."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Selected-date, cache, async load, and save state ownership."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Date and API payload type boundaries."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Responsive, interaction, and browser verification requirements."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend entry point for Todo date scoping and the days endpoint."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Additive dual-path schema migration and date-keyed persistence contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Validation and authenticated API error behavior."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The date key crosses database, API, client cache, and UI navigation."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Time/date utilities and validation must remain single-source."}

@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, LockKeyhole, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { AccessGate } from "./components/auth/AccessGate";
+import { TimePicker } from "./components/todo/TimePicker";
 import {
   clearAccessKey,
   createTodo,
   deleteTodo,
   getDayNotes,
+  listAvailableDays,
   listTodos,
   loadAccessKey,
   saveAccessKey,
@@ -14,14 +24,19 @@ import {
   type Todo,
   updateTodo,
 } from "./lib/api";
+import { dateFromKey, formatDateLabel, shiftDateKey, todayKey } from "./lib/date";
 import { quoteForDate } from "./lib/quotes";
 import { isValidTimeRange } from "./lib/time";
 
-function todayKey(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(
+      target.closest(
+        "input, textarea, button, select, [contenteditable='true'], [role='dialog'], [role='listbox']",
+      ),
+    )
+  );
 }
 
 /* ---------- 小组件 ---------- */
@@ -162,6 +177,9 @@ export default function App() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(todayKey);
+  const [availableDates, setAvailableDates] = useState<Set<string>>(() => new Set());
+  const [dayDirection, setDayDirection] = useState(0);
 
   const [draft, setDraft] = useState("");
   const [tlTitle, setTlTitle] = useState("");
@@ -180,18 +198,14 @@ export default function App() {
   const notesRevision = useRef(0);
   const savedNotesRevision = useRef(0);
   const notesSaveQueue = useRef<Promise<void>>(Promise.resolve());
+  const selectedDateRef = useRef(selectedDate);
+  const loadRevision = useRef(0);
+  const navigating = useRef(false);
+  const swipeStart = useRef<{ pointerId: number; x: number } | null>(null);
+  const initialBootstrapStarted = useRef(false);
 
-  const quote = useMemo(() => quoteForDate(), []);
-  const dateKey = useMemo(() => todayKey(), []);
-  const dateLabel = useMemo(
-    () =>
-      new Intl.DateTimeFormat("zh-CN", {
-        month: "long",
-        day: "numeric",
-        weekday: "long",
-      }).format(new Date()),
-    [],
-  );
+  const quote = useMemo(() => quoteForDate(dateFromKey(selectedDate)), [selectedDate]);
+  const dateLabel = useMemo(() => formatDateLabel(selectedDate), [selectedDate]);
 
   const listTodosPlain = useMemo(
     () => todos.filter((t) => !t.scheduledStart),
@@ -242,7 +256,15 @@ export default function App() {
         notesSaveQueue.current = request.catch(() => undefined);
         await request;
         savedNotesRevision.current = Math.max(savedNotesRevision.current, revision);
-        setNotesStatus(notesRevision.current === revision ? "saved" : "idle");
+        if (selectedDateRef.current === date) {
+          setNotesStatus(notesRevision.current === revision ? "saved" : "idle");
+        }
+        if (values.summary.trim() || values.goals.trim() || values.notes.trim()) {
+          setAvailableDates((current) => new Set(current).add(date));
+        }
+        void listAvailableDays(key)
+          .then((result) => setAvailableDates(new Set(result.dates)))
+          .catch(() => undefined);
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "request_failed";
         if (message === "unauthorized") {
@@ -251,66 +273,101 @@ export default function App() {
           setAuthorized(false);
           return;
         }
-        setNotesStatus("error");
-        setError("日记内容保存失败，请稍后重试。");
+        if (selectedDateRef.current === date) {
+          setNotesStatus("error");
+          setError("日记内容保存失败，请稍后重试。");
+        }
       }
     },
     [],
   );
+
+  const loadDay = useCallback(async (key: string, date: string, knownDates: Set<string>) => {
+    const revision = ++loadRevision.current;
+    setLoading(true);
+    setError("");
+    notesLoaded.current = false;
+    setTodos([]);
+    setSummary("");
+    setGoals("");
+    setNotes("");
+    notesRevision.current = 0;
+    savedNotesRevision.current = 0;
+    setNotesStatus("idle");
+
+    if (!knownDates.has(date)) {
+      notesLoaded.current = true;
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const [todoResult, dayNotes] = await Promise.all([
+        listTodos(key, "all", date),
+        getDayNotes(key, date),
+      ]);
+      if (revision !== loadRevision.current || selectedDateRef.current !== date) return;
+      setTodos(todoResult.items);
+      setSummary(dayNotes.summary);
+      setGoals(dayNotes.goals);
+      setNotes(dayNotes.notes);
+      notesRevision.current = 0;
+      savedNotesRevision.current = 0;
+      notesLoaded.current = true;
+      setNotesStatus("idle");
+    } catch (caught) {
+      if (revision !== loadRevision.current) return;
+      const message = caught instanceof Error ? caught.message : "load_failed";
+      if (message === "unauthorized") {
+        clearAccessKey();
+        setAccessKey("");
+        setAuthorized(false);
+      } else {
+        setError("读取这一天的数据失败，请稍后重试。");
+        setNotesStatus("error");
+      }
+    } finally {
+      if (revision === loadRevision.current) setLoading(false);
+    }
+  }, []);
 
   const bootstrap = useCallback(
     async (key: string) => {
       setLoading(true);
       setError("");
       try {
-        const todoResult = await listTodos(key, "all");
-        setTodos(todoResult.items);
-
-        try {
-          const dayNotes = await getDayNotes(key, todayKey());
-          setSummary(dayNotes.summary);
-          setGoals(dayNotes.goals);
-          setNotes(dayNotes.notes);
-          notesRevision.current = 0;
-          savedNotesRevision.current = 0;
-          notesLoaded.current = true;
-          setNotesStatus("idle");
-        } catch (caught) {
-          const message = caught instanceof Error ? caught.message : "request_failed";
-          if (message === "unauthorized") throw caught;
-          notesLoaded.current = false;
-          setNotesStatus("error");
-          setError("待办已加载，但日记内容读取失败。");
-        }
+        const result = await listAvailableDays(key);
+        const dates = new Set(result.dates);
+        setAvailableDates(dates);
         setAuthorized(true);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "load_failed";
+        await loadDay(key, selectedDateRef.current, dates);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "load_failed";
         if (message === "unauthorized") {
           clearAccessKey();
           setAccessKey("");
           setAuthorized(false);
         } else {
-          notesLoaded.current = false;
-          setNotesStatus("error");
           setAuthorized(true);
+          setError("读取日期索引失败，请稍后重试。");
         }
-        setError("读取数据失败，请稍后重试。");
       } finally {
         setLoading(false);
         setBootstrapping(false);
       }
     },
-    [],
+    [loadDay],
   );
 
   useEffect(() => {
+    if (initialBootstrapStarted.current) return;
+    initialBootstrapStarted.current = true;
     if (!accessKey) {
       setBootstrapping(false);
       return;
     }
     void bootstrap(accessKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [accessKey, bootstrap]);
 
   useEffect(() => {
     if (!authorized || !accessKey || !notesLoaded.current) return;
@@ -320,7 +377,7 @@ export default function App() {
     notesTimer.current = window.setTimeout(() => {
       void persistDayNotes(
         accessKey,
-        dateKey,
+        selectedDate,
         { summary, goals, notes },
         revision,
       );
@@ -328,7 +385,7 @@ export default function App() {
     return () => {
       if (notesTimer.current) window.clearTimeout(notesTimer.current);
     };
-  }, [summary, goals, notes, authorized, accessKey, dateKey, persistDayNotes]);
+  }, [summary, goals, notes, authorized, accessKey, selectedDate, persistDayNotes]);
 
   function markNotesChanged() {
     notesRevision.current += 1;
@@ -338,16 +395,76 @@ export default function App() {
     );
   }
 
-  function flushDayNotes() {
+  const flushDayNotes = useCallback(async () => {
     if (!accessKey || !notesLoaded.current) return;
     if (notesTimer.current) window.clearTimeout(notesTimer.current);
-    void persistDayNotes(
+    await persistDayNotes(
       accessKey,
-      dateKey,
+      selectedDateRef.current,
       { summary, goals, notes },
       notesRevision.current,
     );
-  }
+  }, [accessKey, goals, notes, persistDayNotes, summary]);
+
+  const refreshWorkspace = useCallback(async () => {
+    if (!accessKey) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await listAvailableDays(accessKey);
+      const dates = new Set(result.dates);
+      setAvailableDates(dates);
+      await loadDay(accessKey, selectedDateRef.current, dates);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "load_failed";
+      if (message === "unauthorized") {
+        clearAccessKey();
+        setAccessKey("");
+        setAuthorized(false);
+      } else {
+        setError("刷新失败，请稍后重试。");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [accessKey, loadDay]);
+
+  const navigateDay = useCallback(
+    async (offset: -1 | 1) => {
+      if (!accessKey || navigating.current) return;
+      navigating.current = true;
+      try {
+        await flushDayNotes();
+        const nextDate = shiftDateKey(selectedDateRef.current, offset);
+        selectedDateRef.current = nextDate;
+        setDayDirection(offset);
+        setSelectedDate(nextDate);
+        setDraft("");
+        setTlTitle("");
+        setTlError("");
+        await loadDay(accessKey, nextDate, availableDates);
+      } finally {
+        navigating.current = false;
+      }
+    },
+    [accessKey, availableDates, flushDayNotes, loadDay],
+  );
+
+  useEffect(() => {
+    if (!authorized) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isInteractiveTarget(event.target)) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        void navigateDay(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        void navigateDay(1);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [authorized, navigateDay]);
 
   function handleAuthorized(key: string) {
     saveAccessKey(key);
@@ -359,8 +476,9 @@ export default function App() {
   }
 
   function handleLogout() {
-    flushDayNotes();
+    void flushDayNotes();
     if (notesTimer.current) window.clearTimeout(notesTimer.current);
+    loadRevision.current += 1;
     clearAccessKey();
     setAccessKey("");
     setAuthorized(false);
@@ -372,16 +490,19 @@ export default function App() {
     notesLoaded.current = false;
     notesRevision.current = 0;
     savedNotesRevision.current = 0;
+    setAvailableDates(new Set());
   }
 
   async function handleCreateDot(e: React.FormEvent) {
     e.preventDefault();
     if (!accessKey || !draft.trim()) return;
+    const date = selectedDateRef.current;
     const created = await runMutation(() =>
-      createTodo(accessKey, { title: draft.trim(), pageKey: "inbox" }),
+      createTodo(accessKey, { title: draft.trim(), dateKey: date, pageKey: "inbox" }),
     );
     if (created) {
-      setTodos((cur) => [created, ...cur]);
+      if (selectedDateRef.current === date) setTodos((cur) => [created, ...cur]);
+      setAvailableDates((current) => new Set(current).add(date));
       setDraft("");
     }
   }
@@ -394,16 +515,19 @@ export default function App() {
       setTlError("结束时间需要晚于开始时间");
       return;
     }
+    const date = selectedDateRef.current;
     const created = await runMutation(() =>
       createTodo(accessKey, {
         title: tlTitle.trim(),
+        dateKey: date,
         pageKey: "schedule",
         scheduledStart: tlStart,
         scheduledEnd: tlEnd,
       }),
     );
     if (created) {
-      setTodos((cur) => [created, ...cur]);
+      if (selectedDateRef.current === date) setTodos((cur) => [created, ...cur]);
+      setAvailableDates((current) => new Set(current).add(date));
       setTlTitle("");
     }
   }
@@ -413,7 +537,7 @@ export default function App() {
     const updated = await runMutation(() =>
       updateTodo(accessKey, todo.id, { isDone: !todo.isDone }),
     );
-    if (updated) {
+    if (updated && updated.dateKey === selectedDateRef.current) {
       setTodos((cur) => cur.map((t) => (t.id === todo.id ? updated : t)));
     }
   }
@@ -421,7 +545,7 @@ export default function App() {
   async function handleRename(todo: Todo, title: string) {
     if (!accessKey) return;
     const updated = await runMutation(() => updateTodo(accessKey, todo.id, { title }));
-    if (updated) {
+    if (updated && updated.dateKey === selectedDateRef.current) {
       setTodos((cur) => cur.map((t) => (t.id === todo.id ? updated : t)));
     }
   }
@@ -432,7 +556,14 @@ export default function App() {
       await deleteTodo(accessKey, todo.id);
       return true;
     });
-    if (ok) setTodos((cur) => cur.filter((t) => t.id !== todo.id));
+    if (ok) {
+      if (todo.dateKey === selectedDateRef.current) {
+        setTodos((cur) => cur.filter((t) => t.id !== todo.id));
+      }
+      void listAvailableDays(accessKey)
+        .then((result) => setAvailableDates(new Set(result.dates)))
+        .catch(() => undefined);
+    }
   }
 
   /* ---------- 渲染 ---------- */
@@ -453,6 +584,22 @@ export default function App() {
     <div className="journal-scene">
       <motion.div
         className="journal-book"
+        data-selected-date={selectedDate}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || isInteractiveTarget(event.target)) return;
+          swipeStart.current = { pointerId: event.pointerId, x: event.clientX };
+        }}
+        onPointerUp={(event) => {
+          const start = swipeStart.current;
+          swipeStart.current = null;
+          if (!start || start.pointerId !== event.pointerId) return;
+          const distance = event.clientX - start.x;
+          if (distance <= -50) void navigateDay(-1);
+          else if (distance >= 50) void navigateDay(1);
+        }}
+        onPointerCancel={() => {
+          swipeStart.current = null;
+        }}
         initial={
           entering && !reduceMotion
             ? { opacity: 0, rotateX: 8, y: 34, scale: 0.97 }
@@ -464,7 +611,37 @@ export default function App() {
         {/* 书页顶部 */}
         <header className="journal-header">
           <div className="journal-date">
-            <span className="journal-date-num">{dateLabel}</span>
+            <div className="journal-date-nav">
+              <button
+                type="button"
+                className="date-nav-btn"
+                aria-label="前一天"
+                title="前一天"
+                disabled={loading}
+                onClick={() => void navigateDay(-1)}
+              >
+                <ChevronLeft size={17} aria-hidden="true" />
+              </button>
+              <time className="journal-date-num" dateTime={selectedDate}>
+                {dateLabel}
+              </time>
+              <span
+                className="journal-date-state"
+                data-available={availableDates.has(selectedDate)}
+                aria-label={availableDates.has(selectedDate) ? "这一天有记录" : "这一天是空白页"}
+                title={availableDates.has(selectedDate) ? "这一天有记录" : "这一天是空白页"}
+              />
+              <button
+                type="button"
+                className="date-nav-btn"
+                aria-label="后一天"
+                title="后一天"
+                disabled={loading}
+                onClick={() => void navigateDay(1)}
+              >
+                <ChevronRight size={17} aria-hidden="true" />
+              </button>
+            </div>
             <span className="journal-quote">「{quote}」</span>
           </div>
           <div className="journal-actions">
@@ -474,7 +651,7 @@ export default function App() {
               aria-label="刷新"
               title="刷新"
               disabled={loading}
-              onClick={() => accessKey && void bootstrap(accessKey)}
+              onClick={() => void refreshWorkspace()}
             >
               <RefreshCw size={15} aria-hidden="true" />
             </button>
@@ -496,7 +673,16 @@ export default function App() {
           </p>
         ) : null}
 
-        <div className="journal-grid">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={selectedDate}
+            className="journal-grid"
+            data-date-key={selectedDate}
+            initial={reduceMotion ? false : { opacity: 0.45, x: dayDirection * 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0.25, x: dayDirection * -18 }}
+            transition={{ duration: reduceMotion ? 0.01 : 0.24, ease: "easeOut" }}
+          >
           {/* 左列 */}
           <div className="journal-left">
             {/* 上：清单（3） */}
@@ -542,20 +728,17 @@ export default function App() {
               </h2>
               <form className="tl-composer" onSubmit={handleCreateTimeline}>
                 <div className="tl-composer-times">
-                  <input
-                    type="time"
+                  <TimePicker
+                    label="开始时间"
                     value={tlStart}
-                    onChange={(e) => setTlStart(e.target.value)}
-                    aria-label="开始时间"
-                    required
+                    onChange={setTlStart}
                   />
                   <span className="tl-composer-sep">→</span>
-                  <input
-                    type="time"
+                  <TimePicker
+                    label="结束时间"
                     value={tlEnd}
-                    onChange={(e) => setTlEnd(e.target.value)}
-                    aria-label="结束时间"
-                    required
+                    onChange={setTlEnd}
+                    align="end"
                   />
                 </div>
                 <input
@@ -596,7 +779,9 @@ export default function App() {
           <div className="journal-right">
             <section className="pane pane-review">
               <h2 className="pane-title">
-                <span className="pane-title-zh">今日回顾</span>
+                <span className="pane-title-zh">
+                  {selectedDate === todayKey() ? "今日回顾" : "当日回顾"}
+                </span>
                 <span className="pane-title-en">Review</span>
               </h2>
 
@@ -608,7 +793,7 @@ export default function App() {
                 <div
                   className="review-bar"
                   role="progressbar"
-                  aria-label="今日完成进度"
+                    aria-label="当日完成进度"
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={progress}
@@ -697,7 +882,8 @@ export default function App() {
               </p>
             </section>
           </div>
-        </div>
+          </motion.div>
+        </AnimatePresence>
       </motion.div>
     </div>
   );

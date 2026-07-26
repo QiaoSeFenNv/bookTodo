@@ -284,19 +284,40 @@ button { cursor: pointer; }
   min-height: min(86vh, 820px);
   display: flex;
   flex-direction: column;
-  border-radius: 14px;
-  background:
-    radial-gradient(85% 100% at 50% 0%, rgba(255, 255, 255, 0.55), transparent 60%),
-    var(--paper);
+  border-radius: 7px 9px 9px 7px;
+  background-image: linear-gradient(
+      90deg,
+      #fcf9f1 0%,
+      #f7f1e5 29%,
+      #dcd2bf 30.2%,
+      #fffdf7 31.5%,
+      #f9f6ee 100%
+    );
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.6) inset,
     0 30px 70px rgba(36, 54, 50, 0.24),
     0 6px 18px rgba(36, 54, 50, 0.14);
   padding: clamp(18px, 3vw, 34px) clamp(16px, 3.4vw, 40px) clamp(16px, 2.6vw, 28px);
   position: relative;
+  isolation: isolate;
 }
 
-/* 底部纸叠 */
+/* 多层纸边 */
+.journal-book::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: -8px;
+  bottom: 5px;
+  width: 16px;
+  z-index: -2;
+  border-radius: 5px 12px 12px 5px;
+  background:
+    repeating-linear-gradient(to bottom, rgba(228, 220, 203, 0.88) 0 2px, rgba(242, 236, 223, 0.88) 2px 4px),
+    url("/paper-texture.png");
+  box-shadow: 12px 20px 30px rgba(36, 54, 50, 0.18);
+}
+
 .journal-book::after {
   content: "";
   position: absolute;
@@ -304,8 +325,8 @@ button { cursor: pointer; }
   right: 10px;
   bottom: -7px;
   height: 7px;
-  border-radius: 0 0 12px 12px;
-  background: linear-gradient(#e5ddcb, #d3c9b2);
+  border-radius: 0 0 8px 8px;
+  background: repeating-linear-gradient(to right, #e9e1d2 0 4px, #d8cebb 4px 6px);
   box-shadow: 0 5px 12px rgba(36, 54, 50, 0.2);
   z-index: -1;
 }
@@ -327,6 +348,48 @@ button { cursor: pointer; }
   gap: 16px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.journal-date-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.date-nav-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.date-nav-btn:hover:not(:disabled),
+.date-nav-btn:focus-visible {
+  background: rgba(176, 140, 79, 0.1);
+  color: var(--accent-deep);
+  outline: none;
+}
+
+.date-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.journal-date-state {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(43, 42, 38, 0.16);
+}
+
+.journal-date-state[data-available="true"] {
+  background: var(--leaf);
+  box-shadow: 0 0 0 3px rgba(95, 122, 95, 0.1);
 }
 
 .journal-date-num {
@@ -380,20 +443,17 @@ button { cursor: pointer; }
 .journal-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 3fr) auto minmax(0, 7fr);
-  gap: 0 clamp(16px, 2.6vw, 34px);
+  grid-template-columns: minmax(260px, 3fr) 18px minmax(0, 7fr);
+  gap: 0;
   min-height: 0;
 }
 
 .journal-spine {
-  width: 1px;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    rgba(43, 42, 38, 0.14) 12%,
-    rgba(43, 42, 38, 0.14) 88%,
-    transparent
-  );
+  width: 18px;
+  background: linear-gradient(90deg, rgba(94, 76, 48, 0.1), rgba(255, 255, 255, 0.72) 48%, rgba(94, 76, 48, 0.12));
+  box-shadow:
+    -10px 0 16px rgba(63, 49, 28, 0.07),
+    10px 0 18px rgba(63, 49, 28, 0.08);
   position: relative;
 }
 
@@ -401,16 +461,19 @@ button { cursor: pointer; }
 .journal-spine::after {
   content: "";
   position: absolute;
-  left: -14px;
-  right: -14px;
-  height: 30%;
+  left: 8px;
+  right: auto;
+  width: 1px;
+  height: 100%;
   pointer-events: none;
 }
 
 .journal-spine::before {
   top: 0;
-  background: linear-gradient(90deg, transparent, rgba(43, 42, 38, 0.025), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(138, 106, 52, 0.3) 15%, rgba(138, 106, 52, 0.3) 85%, transparent);
 }
+
+.journal-spine::after { top: 0; left: 9px; background: rgba(255, 255, 255, 0.5); }
 
 /* 左列：3 / 7 分块 */
 .journal-left {
@@ -418,9 +481,14 @@ button { cursor: pointer; }
   grid-template-rows: minmax(0, 3fr) minmax(0, 7fr);
   gap: clamp(12px, 1.8vw, 20px);
   min-height: 0;
+  padding-right: clamp(14px, 2vw, 24px);
 }
 
-.journal-right { min-height: 0; display: grid; }
+.journal-right {
+  min-height: 0;
+  display: grid;
+  padding-left: clamp(14px, 2vw, 24px);
+}
 
 /* ---------- pane 通用 ---------- */
 
@@ -562,6 +630,8 @@ button { cursor: pointer; }
   background: transparent;
   padding: 2px 0;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dot-title:focus {
@@ -615,22 +685,101 @@ button { cursor: pointer; }
   grid-column: 1 / -1;
 }
 
-.tl-composer-times input[type="time"] {
-  border: 0;
-  border-bottom: 1px solid var(--hairline);
-  background: transparent;
-  padding: 6px 0;
-  width: 110px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-2);
-}
-
-.tl-composer-times input[type="time"]:focus {
-  outline: none;
-  border-bottom-color: var(--accent);
-}
-
 .tl-composer-sep { color: var(--ink-3); font-size: 0.8rem; }
+
+.time-picker {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.tl-composer .time-picker-trigger {
+  width: 100%;
+  min-width: 92px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid rgba(176, 140, 79, 0.24);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.42);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.65);
+}
+
+.tl-composer .time-picker-trigger:hover,
+.tl-composer .time-picker-trigger:focus-visible,
+.tl-composer .time-picker-trigger[aria-expanded="true"] {
+  transform: none;
+  outline: none;
+  border-color: rgba(176, 140, 79, 0.62);
+  background: rgba(255, 253, 247, 0.82);
+}
+
+.time-picker-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 40;
+  width: min(250px, calc(100vw - 48px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 7px;
+  padding: 10px 10px 12px;
+  border: 1px solid rgba(138, 106, 52, 0.24);
+  border-radius: 7px;
+  background: #fffaf0;
+  box-shadow: 0 16px 36px rgba(43, 42, 38, 0.2);
+}
+
+.time-picker[data-align="end"] .time-picker-popover { right: 0; left: auto; }
+.time-picker-column { min-width: 0; display: grid; gap: 5px; }
+.time-picker-heading { color: var(--ink-3); font-size: 0.68rem; text-align: center; }
+.time-picker-colon { align-self: center; color: var(--accent-deep); }
+
+.time-picker-list {
+  height: 184px;
+  overflow-y: auto;
+  border-block: 1px solid rgba(43, 42, 38, 0.07);
+  scroll-behavior: smooth;
+}
+
+.time-picker-list:focus-visible { outline: 2px solid rgba(176, 140, 79, 0.4); outline-offset: 1px; }
+
+.time-picker-option {
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.time-picker-option:hover { background: rgba(176, 140, 79, 0.1); }
+.time-picker-option[aria-selected="true"] { background: var(--accent-deep); color: #fffaf0; }
+
+.tl-composer .time-picker-done {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--leaf);
+}
+
+.tl-composer .time-picker-done:hover,
+.tl-composer .time-picker-done:focus-visible {
+  transform: none;
+  background: rgba(95, 122, 95, 0.1);
+  outline: none;
+}
 
 .tl-composer-title {
   border: 0;
@@ -874,6 +1023,7 @@ button { cursor: pointer; }
   .journal-book {
     min-height: auto;
     padding: 18px 16px 20px;
+    background-image: linear-gradient(#fcf9f1, #f8f4eb);
   }
 
   .journal-grid {
@@ -891,11 +1041,18 @@ button { cursor: pointer; }
       rgba(43, 42, 38, 0.14) 85%,
       transparent
     );
+    box-shadow: 0 -8px 14px rgba(63, 49, 28, 0.08), 0 8px 14px rgba(63, 49, 28, 0.08);
   }
+
+  .journal-spine::before,
+  .journal-spine::after { display: none; }
 
   .journal-left {
     grid-template-rows: none;
+    padding-right: 0;
   }
+
+  .journal-right { padding-left: 0; }
 
   .tl-composer {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -910,6 +1067,8 @@ button { cursor: pointer; }
 
   .journal-quote { display: none; }
 
+  .journal-header { align-items: center; }
+
   .gate-book { transform: rotateX(4deg) rotateY(-6deg); }
 }
 
@@ -922,6 +1081,13 @@ button { cursor: pointer; }
   .padlock-svg { width: 48px; height: 58px; }
   .gate-form { grid-template-columns: minmax(0, 1fr); gap: 7px; }
   .gate-form button { width: 100%; }
+  .journal-header { gap: 8px; }
+  .journal-date { gap: 6px; }
+  .journal-date-num { font-size: 1.02rem; }
+  .date-nav-btn { width: 26px; height: 26px; }
+  .journal-actions { gap: 4px; }
+  .tl-composer-times { gap: 3px; }
+  .tl-composer .time-picker-trigger { min-width: 0; padding-inline: 6px; }
 }
 
 /* ============ Reduced motion ============ */

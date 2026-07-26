@@ -127,3 +127,100 @@ try {
 - Treating `^\d{4}-\d{2}-\d{2}$` as sufficient date validation. PostgreSQL and JavaScript can normalize impossible dates unless the route checks calendar components.
 - Updating `001_init.sql` but forgetting `ensureSchema()`, or the reverse.
 - Swallowing day-note read/write errors while continuing to render an apparently successful workspace.
+
+## Scenario: Date-Scoped Todos and Available-Day Index
+
+### 1. Scope / Trigger
+
+Use this contract whenever Todo persistence or daily-workspace navigation changes. A date is the ownership boundary for Todos and journal writing. The lightweight available-day index is the only authority the frontend may use to decide whether a detail read is necessary.
+
+### 2. Signatures
+
+Database:
+
+```sql
+todos.date_key DATE NOT NULL DEFAULT CURRENT_DATE
+CREATE INDEX idx_todos_date_schedule_sort
+  ON todos (date_key, scheduled_start, sort_order)
+```
+
+HTTP:
+
+```text
+GET  /api/days
+GET  /api/todos?date=YYYY-MM-DD&status=all|active|done
+POST /api/todos { "title": "...", "date_key": "YYYY-MM-DD" }
+X-Access-Key: <APP_ACCESS_KEY>
+```
+
+Frontend:
+
+```typescript
+listAvailableDays(accessKey): Promise<{ dates: string[] }>
+listTodos(accessKey, status, date): Promise<{ items: Todo[] }>
+Todo.dateKey: string
+```
+
+### 3. Contracts
+
+- `GET /api/days` returns sorted, unique `YYYY-MM-DD` strings from the union of all Todo dates and daily-note dates whose trimmed `summary`, `goals`, or `notes` is non-empty.
+- The endpoint requires the same access key as Todo and day-note details and never returns detail payloads.
+- `GET /api/todos` keeps `date` optional for compatibility. When present, it filters exclusively by `todos.date_key`.
+- `POST /api/todos` accepts optional `date_key` for compatibility; the V2 workspace always sends its selected date. Omission uses the database `CURRENT_DATE` default.
+- Todo responses always include camel-case `dateKey`.
+- Existing rows migrate additively: add nullable `date_key`, backfill nulls with `CURRENT_DATE`, then set the default and `NOT NULL` constraint.
+- Apply that migration in both `ensureSchema()` and `001_init.sql`; never drop or rewrite existing Todo rows.
+- Frontend bootstrap reads `/api/days` first. An absent date renders a local empty projection without calling either detail endpoint. A present date calls both `/api/todos?date=...` and `/api/day-notes?date=...`.
+- Before changing dates, flush pending journal writes. Associate detail responses with the requested date/revision and ignore stale responses.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Missing or wrong access key on `/api/days` | HTTP 401, `{ "error": "unauthorized" }` |
+| Impossible Todo query date such as `2026-02-31` | HTTP 400, `{ "error": "invalid_query" }` |
+| Impossible Todo create `date_key` | HTTP 400, `{ "error": "invalid_request" }` |
+| Valid date absent from `/api/days` | Local empty workspace; zero Todo/day-note detail GETs |
+| Valid date present in `/api/days` | Both detail GETs execute and project only that date |
+| Existing V1 Todo with null/missing date during migration | Backfilled to PostgreSQL `CURRENT_DATE` |
+| Detail response arrives after another date was selected | Response is ignored |
+
+### 5. Good / Base / Bad Cases
+
+- Good: seed different Todos on yesterday and tomorrow, navigate independently, and observe only the selected date's records.
+- Base: navigate to a date absent from the index and immediately show empty Todos and writing fields without detail reads.
+- Bad: fetch the global Todo list on every date change, infer availability from cached details, or add `date_key` to only one schema bootstrap path.
+
+### 6. Tests Required
+
+- `npm run build` must compile the frontend and backend contracts.
+- `npm run db:init` must be repeatable and preserve existing Todo rows.
+- `scripts/check-ui.mjs` must assert authenticated `/api/days`, sorted indexed dates, impossible-date rejection, and `Todo.dateKey` on old/new records.
+- Browser network assertions must prove indexed dates issue both detail reads and a non-indexed date issues neither.
+- Browser checks must seed and clean timestamp-prefixed Todos on separate dates and restore modified daily notes in `finally`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+// Leaks records across days and performs unnecessary detail reads.
+const [todos, notes] = await Promise.all([
+  listTodos(key),
+  getDayNotes(key, selectedDate),
+]);
+```
+
+#### Correct
+
+```typescript
+const { dates } = await listAvailableDays(key);
+if (!dates.includes(selectedDate)) {
+  showLocalEmptyDay();
+  return;
+}
+const [todos, notes] = await Promise.all([
+  listTodos(key, "all", selectedDate),
+  getDayNotes(key, selectedDate),
+]);
+```
