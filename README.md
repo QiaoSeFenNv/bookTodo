@@ -296,7 +296,14 @@ Script Path: Jenkinsfile
 http://<服务器公网 IP>:28889
 ```
 
-应用对普通 API 按来源 IP 限制为每分钟 60 次请求，对解锁校验限制为每分钟 5 次，超限返回 HTTP `429`。服务器安全组或防火墙只需放行 TCP `28889`，不要开放 PostgreSQL 的 `5432` 端口。
+应用对普通 API 按来源 IP 限制为每分钟 60 次请求，对解锁校验限制为每分钟 5 次，超限返回 HTTP `429`。连续 5 次输入错误的解锁密钥后，Book Todo 进程会主动退出且容器不会自动重启；需要管理员在服务器上手动重新启动。服务器安全组或防火墙只需放行 TCP `28889`，不要开放 PostgreSQL 的 `5432` 端口。
+
+解锁失败导致服务停止后，检查日志并手动恢复：
+
+```bash
+docker logs --tail 100 book-todo
+docker compose --env-file .env -f docker-compose.prod.yml up -d
+```
 
 直接使用 HTTP 时，解锁密钥不会被加密传输。公网长期使用仍建议后续配置独立域名和 HTTPS；不要修改当前服务 `renti-agent` 使用的 Nginx 配置来完成本次部署。
 

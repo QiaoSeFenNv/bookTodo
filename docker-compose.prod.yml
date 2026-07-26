@@ -4,7 +4,7 @@ services:
   book-todo:
     image: "${BOOK_TODO_IMAGE:-book-todo:latest}"
     container_name: book-todo
-    restart: unless-stopped
+    restart: "no"
     init: true
     network_mode: host
     environment:
