@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/07-26-book-todo-mvp/prd.md", "reason": "Product requirements, MVP scope, auth and acceptance criteria"}
+{"file": ".trellis/tasks/07-26-book-todo-mvp/design.md", "reason": "Architecture, data model, API, book UI and deployment design"}
+{"file": ".trellis/tasks/07-26-book-todo-mvp/implement.md", "reason": "Milestone execution plan for implementation agents"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline entrypoint"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline entrypoint"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "API/UI/DB cross-layer consistency checklist"}

@@ -1,0 +1,22 @@
+{
+  "name": "book-todo",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others --names server,web --prefix-colors blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "npm run dev -w @book-todo/server",
+    "dev:web": "npm run dev -w @book-todo/web",
+    "build": "npm run build -w @book-todo/web && npm run build -w @book-todo/server",
+    "start": "npm run start -w @book-todo/server",
+    "db:init": "npm run db:init -w @book-todo/server",
+    "local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1",
+    "check:ui": "node scripts/check-ui.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "playwright-core": "^1.54.1"
+  }
+}

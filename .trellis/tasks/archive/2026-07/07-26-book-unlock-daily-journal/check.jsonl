@@ -1,0 +1,7 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend quality checklist and spec entry point."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Responsive, accessibility, and browser verification review criteria."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Review TypeScript and API boundary safety."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend quality checklist for the existing persistence changes."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend build, validation, and review expectations."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review day-note schema/query compatibility and non-destructive behavior."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify daily-note data survives the complete SQL-to-UI round trip."}

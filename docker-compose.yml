@@ -1,0 +1,22 @@
+services:
+  todo-postgres:
+    image: postgres:16
+    container_name: todo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${TODO_POSTGRES_PASSWORD:-123456}"
+      POSTGRES_DB: todo
+      TZ: Asia/Shanghai
+    ports:
+      - "55432:5432"
+    volumes:
+      - todo-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d todo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  todo-postgres-data:

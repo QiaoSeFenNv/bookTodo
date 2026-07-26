@@ -1,0 +1,34 @@
+{
+  "id": "book-todo-mvp",
+  "name": "book-todo-mvp",
+  "title": "Book-style personal Todo MVP",
+  "description": "Build a personal book-like Todo website with React frontend, Node backend, PostgreSQL storage, and access-key protection.",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "qiaose",
+  "assignee": "qiaose",
+  "createdAt": "2026-07-26",
+  "completedAt": "2026-07-26",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "apps/",
+    "server/",
+    "client/"
+  ],
+  "notes": "Created manually because local Python runtime is unavailable for task.py. User approved task creation with '请开始'.",
+  "meta": {
+    "ui": "book-flip",
+    "auth": "access-key",
+    "db": "postgresql"
+  }
+}

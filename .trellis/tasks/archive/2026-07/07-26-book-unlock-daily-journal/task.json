@@ -1,0 +1,31 @@
+{
+  "id": "book-unlock-daily-journal",
+  "name": "book-unlock-daily-journal",
+  "title": "Book unlock entry and daily journal workspace redesign",
+  "description": "Redesign the access-key entry as a locked 3D book and replace the template modes with a responsive daily journal workspace.",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": "apps/web, existing day-note API compatibility, and browser acceptance checks",
+  "package": null,
+  "priority": "P2",
+  "creator": "qiaose",
+  "assignee": "qiaose",
+  "createdAt": "2026-07-26",
+  "completedAt": "2026-07-26",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "apps/web/src/",
+    "apps/server/src/routes/day-notes.ts",
+    "apps/server/src/sql/001_init.sql",
+    "scripts/check-ui.mjs"
+  ],
+  "notes": "Requirements recovered from Codex session 019f9e25-acf7-7dd1-83af-a7994ad341d6. The user approved the recorded final plan with 'Implement the plan.' and requested execution again in the current session.",
+  "meta": {}
+}

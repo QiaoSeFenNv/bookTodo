@@ -1,0 +1,10 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend package entry point and pre-development conventions for the redesign."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Component, styling, and accessibility conventions for the React UI."}
+{"file":".trellis/spec/frontend/state-management.md","reason":"State ownership and server synchronization guidance for the workspace."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"TypeScript boundary and payload safety guidance."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Frontend responsive, accessibility, and verification quality requirements."}
+{"file":".trellis/spec/backend/index.md","reason":"Backend package entry point because existing day-note persistence must be audited."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Database compatibility guidance for the existing day-note table."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"API validation and error response guidance for day notes."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The day-note date/text contract crosses SQL, API, client, and UI boundaries."}
+
