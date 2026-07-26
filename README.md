@@ -1,103 +1,304 @@
-# Book Todo
+# Book Todo 使用与部署说明
 
-一本属于你自己的待办书：React 书本翻页 UI + Node API + PostgreSQL，带访问密钥保护。
+Book Todo 是一个书本风格的个人待办与日记工作台。每个日期拥有独立的待办、时间线、总结、目标和备注，并通过访问密钥保护数据。
 
-## 功能
+## 主要功能
 
-- 访问密钥门禁，校验后自动播放开书动画
-- 有厚度的书本 UI（厚度随已完成任务增加）
-- 封面 / 今日 / 清单 / 日程等多页；左右边缘点击或滑动翻页（也支持方向键）
-- 模板 A 简洁列表 · B 自由时间块 · C 大纲 + 日程（偏好服务端持久化）
-- 每日一句激励语
-- 待办新增、编辑、完成、删除、筛选、时间安排
-- 数据持久化到独立 PostgreSQL（不复用其他业务库）
+- 访问密钥解锁
+- 按日期保存独立工作区
+- 左滑查看昨天，右滑查看明天
+- 支持日期按钮和键盘方向键切换
+- 待办新增、编辑、完成和删除
+- 自定义时间选择器与时间线
+- 每日总结、目标和备注自动保存
+- PostgreSQL 持久化存储
+- 桌面端和移动端响应式书本界面
 
 ## 技术栈
 
-- apps/web: Vite + React + TypeScript + framer-motion
-- apps/server: Fastify + pg + Zod
-- PostgreSQL 16（独立 Docker 容器 todo-postgres）
+| 模块 | 技术 |
+|---|---|
+| 前端 | React 19、TypeScript、Vite、Framer Motion |
+| 后端 | Node.js、Fastify、TypeScript、Zod |
+| 数据库 | PostgreSQL 16 |
+| 数据访问 | `pg`，不使用 ORM |
 
-## 本地数据库（WSL Docker）
+## 运行要求
 
-本项目使用独立容器，不复用 renti-pg：
+- Node.js 20 LTS 或更高版本
+- npm 10 或更高版本
+- PostgreSQL 14 或更高版本，推荐 PostgreSQL 16
+
+安装依赖：
 
 ```bash
-# 在 WSL 中
-docker compose up -d
-# 或
-docker start todo-postgres
+npm ci
 ```
 
-默认连接：
-
-```text
-host: 127.0.0.1
-port: 55432
-database: todo
-user: postgres
-password: 123456
-```
-
-端口使用 55432，避免和已有 renti-pg:5432 冲突。
+首次安装且没有 `package-lock.json` 时，可使用 `npm install`。
 
 ## 环境变量
+
+复制环境变量示例：
 
 ```bash
 cp .env.example .env
 ```
 
+开发环境示例：
+
 ```env
 PORT=3000
 DATABASE_URL=postgres://postgres:123456@127.0.0.1:55432/todo
-APP_ACCESS_KEY=book-todo-dev-key
+APP_ACCESS_KEY=change-me-to-a-strong-secret
 NODE_ENV=development
 WEB_ORIGIN=http://localhost:5173
 ```
 
-## 安装与启动
+生产环境示例：
 
-```bash
-npm install
-npm run dev:server
-npm run dev:web
+```env
+PORT=3000
+DATABASE_URL=postgres://book_todo:strong-database-password@127.0.0.1:5432/book_todo
+APP_ACCESS_KEY=replace-with-a-long-random-secret
+NODE_ENV=production
+WEB_ORIGIN=https://todo.example.com
 ```
 
-- Web: http://localhost:5173
-- API: http://localhost:3000/api/health
-- 开发访问密钥：book-todo-dev-key
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `PORT` | 否 | 服务端口，默认 `3000` |
+| `DATABASE_URL` | 是 | PostgreSQL 连接地址 |
+| `APP_ACCESS_KEY` | 是 | 页面解锁密钥，请使用强随机值 |
+| `NODE_ENV` | 否 | `development`、`test` 或 `production` |
+| `WEB_ORIGIN` | 否 | 开发环境前端地址，默认 `http://localhost:5173` |
 
-开发态下 Vite 会把 /api 代理到 3000 端口。服务启动时会自动创建 TABLE IF NOT EXISTS todos。
+不要将生产 `.env`、数据库密码或访问密钥提交到 Git 仓库。
 
-## 生产构建
+## 数据库准备
+
+### 使用已有 PostgreSQL
+
+应用可以创建表，但不能自动创建 PostgreSQL 数据库和用户。请先以管理员身份执行：
+
+```sql
+CREATE USER book_todo WITH PASSWORD 'replace-with-a-strong-password';
+CREATE DATABASE book_todo
+  WITH OWNER = book_todo
+       ENCODING = 'UTF8';
+```
+
+如果数据库已经存在，可授权应用用户连接：
+
+```sql
+GRANT CONNECT ON DATABASE book_todo TO book_todo;
+\c book_todo
+GRANT USAGE, CREATE ON SCHEMA public TO book_todo;
+```
+
+然后配置连接地址：
+
+```env
+DATABASE_URL=postgres://book_todo:replace-with-a-strong-password@127.0.0.1:5432/book_todo
+```
+
+密码含有 `@`、`:`、`/`、`#` 等字符时，需要进行 URL 编码。
+
+### 使用项目 Docker PostgreSQL
+
+根目录提供了 `docker-compose.yml`：
 
 ```bash
+docker compose up -d todo-postgres
+```
+
+默认配置：
+
+| 配置 | 值 |
+|---|---|
+| 容器名 | `todo-postgres` |
+| 主机端口 | `55432` |
+| 数据库 | `todo` |
+| 用户 | `postgres` |
+| 本地默认密码 | `123456` |
+
+默认密码只适合本地开发。生产环境必须通过 `TODO_POSTGRES_PASSWORD` 设置强密码。
+
+## 初始化数据库表
+
+推荐执行：
+
+```bash
+npm run db:init
+```
+
+也可以直接执行 SQL：
+
+```bash
+psql "$DATABASE_URL" -f apps/server/src/sql/001_init.sql
+```
+
+SQL 文件位于：
+
+```text
+apps/server/src/sql/001_init.sql
+```
+
+脚本可以重复执行，不会删除已有业务数据。它负责创建或补齐以下表：
+
+### `todos`
+
+保存按日期归属的待办和时间线项目，主要字段包括：
+
+- `id`：UUID 主键
+- `title`：待办标题
+- `date_key`：工作区日期
+- `is_done`：完成状态
+- `scheduled_start`、`scheduled_end`：时间线起止时间
+- `sort_order`：排序值
+- `created_at`、`updated_at`、`completed_at`：时间记录
+
+### `daily_notes`
+
+保存每天的书写内容：`summary`、`goals`、`notes` 和更新时间，以 `date_key` 为主键。
+
+### `user_prefs`
+
+保存单用户界面偏好，初始化时会自动写入一条默认记录。
+
+应用启动时也会执行安全的增量建表逻辑，但生产部署仍建议显式执行 `npm run db:init`，让数据库错误在重启服务前暴露。
+
+## 本地开发
+
+1. 启动 PostgreSQL。
+2. 配置 `.env`。
+3. 初始化数据库表。
+4. 启动开发服务。
+
+```bash
+npm run db:init
+npm run dev
+```
+
+访问地址：
+
+- 前端：`http://localhost:5173`
+- API 健康检查：`http://localhost:3000/api/health`
+
+使用 `.env` 中的 `APP_ACCESS_KEY` 解锁页面。
+
+Windows + WSL Docker 环境也可以运行：
+
+```powershell
+npm run local
+```
+
+## 生产构建与启动
+
+```bash
+npm ci
 npm run build
+npm run db:init
 npm run start
 ```
 
-构建后由 Node 同时托管 API 和前端静态资源：http://服务器IP:3000
+构建输出：
 
-## 腾讯云部署提示
+- 前端：`apps/web/dist`
+- 后端：`apps/server/dist`
 
-1. 单独部署 todo-postgres（或独立 Postgres 实例/库），不要复用其他业务容器数据
-2. 配置服务器 .env（使用强 APP_ACCESS_KEY）
-3. npm run build && npm run start
-4. 安全组放行 3000，或前面加 Nginx
-5. 无域名阶段直接用公网 IP 访问
-6. 建议再加来源 IP 限制，不只依赖访问密钥
+生产模式下 Fastify 同时提供 API 和前端静态文件，默认地址为 `http://服务器地址:3000`。
 
-## API
+建议使用 Nginx 提供 HTTPS，不要将 PostgreSQL 端口暴露到公网。
 
-- GET /api/health
-- POST /api/auth/verify
-- GET /api/todos
-- POST /api/todos — body: `{ title, page_key?, scheduled_start?, scheduled_end?, notes? }`
-- PATCH /api/todos/:id — body: `{ title?, is_done?, page_key?, sort_order?, scheduled_start?, scheduled_end?, notes? }`（时间字段可 null 清空）
-- DELETE /api/todos/:id
-- GET /api/prefs — `{ templateMode, lastSpreadId, updatedAt }`
-- PATCH /api/prefs — `{ template_mode?, last_spread_id? }`
+## Jenkins 部署顺序
 
-受保护接口需要请求头：X-Access-Key: <your-key>
+Jenkins 服务器需要安装 Node.js，并能够连接 PostgreSQL。推荐 Pipeline：
 
-时间字段格式为 `HH:mm`（如 `09:00`），起止需成对且结束晚于开始。
+```text
+Checkout
+  -> npm ci
+  -> npm run build
+  -> npm run db:init
+  -> 重启 Book Todo 服务
+  -> 检查 /api/health
+```
+
+通过 Jenkins Credentials 管理 `DATABASE_URL` 和 `APP_ACCESS_KEY`，不要把生产密钥写入 Jenkinsfile。数据库初始化失败时必须终止部署。
+
+部署完成后检查：
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
+正常响应：
+
+```json
+{
+  "ok": true,
+  "db": true,
+  "env": "production"
+}
+```
+
+建议使用 systemd、PM2 或 Docker 管理 Node.js 进程，避免 Jenkins 任务结束后应用进程退出。
+
+## 数据备份
+
+部署或升级前建议备份：
+
+```bash
+pg_dump "$DATABASE_URL" > book_todo_backup.sql
+```
+
+恢复：
+
+```bash
+psql "$DATABASE_URL" < book_todo_backup.sql
+```
+
+## 常用命令
+
+| 命令 | 作用 |
+|---|---|
+| `npm run dev` | 启动前端和后端开发服务 |
+| `npm run build` | 构建前端和后端 |
+| `npm run db:init` | 创建或升级数据库表结构 |
+| `npm run start` | 启动生产服务 |
+| `npm run check:ui` | 执行浏览器与 API 验收检查 |
+
+## 常见问题
+
+### 提示 `DATABASE_URL is required`
+
+确认根目录存在 `.env`，并且 Jenkins 或运行用户能够读取环境变量。
+
+### 数据库连接被拒绝
+
+检查 PostgreSQL 服务、主机、端口、防火墙和用户权限：
+
+```bash
+pg_isready -d "$DATABASE_URL"
+```
+
+### 页面可以打开但无法保存
+
+检查：
+
+1. `APP_ACCESS_KEY` 是否与页面输入一致。
+2. `/api/health` 是否返回 `db: true`。
+3. PostgreSQL 用户是否有表的读写权限。
+4. 日志中是否存在 `401` 或数据库错误。
+
+## 项目目录
+
+```text
+apps/
+  web/                         React 前端
+  server/                      Fastify 后端
+    src/sql/001_init.sql       PostgreSQL 初始化脚本
+scripts/                       本地启动和验收脚本
+docker-compose.yml             本地 PostgreSQL 配置
+.env.example                   环境变量示例
+```
