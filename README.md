@@ -226,7 +226,7 @@ Checkout
 
 通过 Jenkins Credentials 管理 `DATABASE_URL` 和 `APP_ACCESS_KEY`，不要把生产密钥写入 Jenkinsfile。数据库初始化失败时必须终止部署。
 
-部署完成后检查：
+本机源码部署完成后检查：
 
 ```bash
 curl http://127.0.0.1:3000/api/health
@@ -243,6 +243,62 @@ curl http://127.0.0.1:3000/api/health
 ```
 
 建议使用 systemd、PM2 或 Docker 管理 Node.js 进程，避免 Jenkins 任务结束后应用进程退出。
+
+### 当前生产服务器配置
+
+本仓库提供以下生产部署文件：
+
+- `Dockerfile`：构建前端和后端运行镜像
+- `docker-compose.prod.yml`：只部署 Book Todo，不重复创建 PostgreSQL
+- `Jenkinsfile`：创建数据库、执行迁移、部署和健康检查
+
+Book Todo 不加入 `renti-agent` 的 Docker 网络，也不复用其 Nginx。容器使用 Linux host 网络，仅通过宿主机回环地址访问已有 PostgreSQL：
+
+```text
+PostgreSQL container: renti-postgres
+Book Todo database: book_todo
+Book Todo container: book-todo
+Book Todo port: 28889
+Database endpoint used by Book Todo: 127.0.0.1:5432
+```
+
+这种方式不会修改 `renti-nginx`、`renti_renti-network`、`renti-agent` 的容器或镜像。两套应用只共享 PostgreSQL 服务进程，并使用不同的逻辑数据库。
+
+部署前确认端口未占用，并确认 PostgreSQL 容器健康：
+
+```bash
+sudo ss -lntp | grep ':28889 ' || echo '28889 available'
+docker inspect --format '{{.State.Health.Status}}' renti-postgres
+```
+
+在 Jenkins 中创建两个 Secret text Credential：
+
+| Credential ID | 值 |
+|---|---|
+| `book-todo-database-url` | `postgres://postgres:<数据库密码>@127.0.0.1:5432/book_todo` |
+| `book-todo-access-key` | Book Todo 页面使用的强随机解锁密钥 |
+
+新建 Jenkins Pipeline 时选择：
+
+```text
+Definition: Pipeline script from SCM
+SCM: Git
+Repository: https://github.com/QiaoSeFenNv/bookTodo.git
+Branch: */master
+Script Path: Jenkinsfile
+```
+
+首次构建时，Pipeline 会按需创建 `book_todo` 数据库。随后每次构建都会执行可重复的表结构迁移，再替换应用容器。
+
+部署完成后访问：
+
+```text
+http://<服务器公网 IP>:28889
+```
+
+应用对普通 API 按来源 IP 限制为每分钟 60 次请求，对解锁校验限制为每分钟 5 次，超限返回 HTTP `429`。服务器安全组或防火墙只需放行 TCP `28889`，不要开放 PostgreSQL 的 `5432` 端口。
+
+直接使用 HTTP 时，解锁密钥不会被加密传输。公网长期使用仍建议后续配置独立域名和 HTTPS；不要修改当前服务 `renti-agent` 使用的 Nginx 配置来完成本次部署。
 
 ## 数据备份
 

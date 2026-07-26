@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
@@ -21,30 +22,37 @@ async function buildServer() {
     allowedHeaders: ["Content-Type", "X-Access-Key", "Authorization"],
   });
 
-  app.get("/api/health", async (_request, reply) => {
-    try {
-      const dbOk = await pingDb();
-      return {
-        ok: true,
-        db: dbOk,
-        env: env.NODE_ENV,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "db_unavailable";
-      return reply.code(503).send({
-        ok: false,
-        db: false,
-        env: env.NODE_ENV,
-        error: message,
-      });
-    }
-  });
+  await app.register(async (api) => {
+    await api.register(rateLimit, {
+      max: 60,
+      timeWindow: "1 minute",
+    });
 
-  await app.register(authRoutes);
-  await app.register(todoRoutes);
-  await app.register(prefsRoutes);
-  await app.register(dayNotesRoutes);
-  await app.register(dayIndexRoutes);
+    api.get("/api/health", async (_request, reply) => {
+      try {
+        const dbOk = await pingDb();
+        return {
+          ok: true,
+          db: dbOk,
+          env: env.NODE_ENV,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "db_unavailable";
+        return reply.code(503).send({
+          ok: false,
+          db: false,
+          env: env.NODE_ENV,
+          error: message,
+        });
+      }
+    });
+
+    await api.register(authRoutes);
+    await api.register(todoRoutes);
+    await api.register(prefsRoutes);
+    await api.register(dayNotesRoutes);
+    await api.register(dayIndexRoutes);
+  });
 
   const webDistExists = fs.existsSync(path.join(paths.webDist, "index.html"));
   if (webDistExists) {

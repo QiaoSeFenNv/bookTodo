@@ -1,0 +1,31 @@
+name: book-todo
+
+services:
+  book-todo:
+    image: "${BOOK_TODO_IMAGE:-book-todo:latest}"
+    container_name: book-todo
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    environment:
+      PORT: "${BOOK_TODO_PORT:-28889}"
+      DATABASE_URL: "${DATABASE_URL:?DATABASE_URL is required}"
+      APP_ACCESS_KEY: "${APP_ACCESS_KEY:?APP_ACCESS_KEY is required}"
+      NODE_ENV: production
+      WEB_ORIGIN: "${WEB_ORIGIN:-http://localhost:28889}"
+      TZ: Asia/Shanghai
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:${BOOK_TODO_PORT:-28889}/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
