@@ -79,3 +79,24 @@ Rebuilt the access gate as an animated locked book, completed the responsive dai
 ### Next Steps
 
 - Initialize or attach a Git repository before the next commit workflow.
+
+
+## Session 2: V2 daily navigation and book workspace
+
+**Date**: 2026-07-26
+**Task**: V2 daily navigation and book workspace
+**Branch**: `V2`
+
+### Summary
+
+Added date-scoped Todos and journal navigation, indexed empty-day loading, accessible time picker, opened-book workspace styling, browser coverage, and executable specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8238bb1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
