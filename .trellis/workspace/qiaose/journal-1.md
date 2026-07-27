@@ -100,3 +100,25 @@ Added date-scoped Todos and journal navigation, indexed empty-day loading, acces
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Add password-protected multi-book workspaces
+
+**Date**: 2026-07-27
+**Task**: Add password-protected multi-book workspaces
+**Branch**: `feature/multi-account-task-books`
+
+### Summary
+
+Added an outer protected bookshelf, independently passworded books, paginated discovery, per-book PostgreSQL isolation and migration, responsive UI, and full API/browser verification. Fixed save-failure navigation data loss and scoped rate limiting to password routes.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e9ec7a1` | (see git log) |
+| `7378252` | (see git log) |
+
+### Status
+
+[OK] **Completed**
