@@ -342,6 +342,130 @@ test("site and book authentication API", async (t) => {
       }
     });
 
+    await t.test("book update and delete require the current book password", async () => {
+      const managedName = `${runPrefix}managed`;
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/books",
+        headers: { "x-access-key": env.APP_ACCESS_KEY },
+        payload: { name: managedName, password: "old-password" },
+      });
+      assert.equal(created.statusCode, 201);
+      const managed = created.json();
+
+      for (const [method, payload] of [
+        ["PATCH", { name: "x" }],
+        ["PATCH", { currentPassword: "old-password" }],
+        ["PATCH", { name: "n".repeat(81), currentPassword: "old-password" }],
+        ["PATCH", { newPassword: "short", currentPassword: "old-password" }],
+        ["DELETE", {}],
+      ] as const) {
+        const invalid = await app.inject({
+          method,
+          url: `/api/books/${managed.id}`,
+          headers: { "x-access-key": env.APP_ACCESS_KEY },
+          payload,
+        });
+        assert.equal(invalid.statusCode, 400, `${method} ${JSON.stringify(payload)}`);
+        assert.deepEqual(invalid.json(), { error: "invalid_request" });
+      }
+
+      for (const method of ["PATCH", "DELETE"] as const) {
+        const missingBook = await app.inject({
+          method,
+          url: `/api/books/${randomUUID()}`,
+          headers: { "x-access-key": env.APP_ACCESS_KEY },
+          payload:
+            method === "PATCH"
+              ? { name: "anything", currentPassword: "old-password" }
+              : { password: "old-password" },
+        });
+        assert.equal(missingBook.statusCode, 404, method);
+        assert.deepEqual(missingBook.json(), { error: "not_found" });
+
+        const wrongPassword = await app.inject({
+          method,
+          url: `/api/books/${managed.id}`,
+          headers: { "x-access-key": env.APP_ACCESS_KEY },
+          payload:
+            method === "PATCH"
+              ? { name: `${runPrefix}renamed-x`, currentPassword: "wrong-password" }
+              : { password: "wrong-password" },
+        });
+        assert.equal(wrongPassword.statusCode, 401, method);
+        assert.deepEqual(wrongPassword.json(), { error: "book_unauthorized" });
+      }
+
+      const renamed = await app.inject({
+        method: "PATCH",
+        url: `/api/books/${managed.id}`,
+        headers: { "x-access-key": env.APP_ACCESS_KEY },
+        payload: { name: ` ${managedName.toUpperCase()}-2 `, currentPassword: "old-password" },
+      });
+      assert.equal(renamed.statusCode, 200);
+      assert.equal(renamed.json().name, `${managedName.toUpperCase()}-2`);
+      assert.deepEqual(Object.keys(renamed.json()).sort(), ["createdAt", "id", "name"]);
+      assert.doesNotMatch(renamed.body, /password_hash|passwordHash|scrypt/i);
+
+      const nameConflict = await app.inject({
+        method: "PATCH",
+        url: `/api/books/${managed.id}`,
+        headers: { "x-access-key": env.APP_ACCESS_KEY },
+        payload: { name: `${runPrefix}page-0`, currentPassword: "old-password" },
+      });
+      assert.equal(nameConflict.statusCode, 409);
+      assert.deepEqual(nameConflict.json(), { error: "conflict" });
+
+      const passwordChanged = await app.inject({
+        method: "PATCH",
+        url: `/api/books/${managed.id}`,
+        headers: { "x-access-key": env.APP_ACCESS_KEY },
+        payload: { currentPassword: "old-password", newPassword: "new-password-1" },
+      });
+      assert.equal(passwordChanged.statusCode, 200);
+
+      const stored = await queryWithRetry<{ password_hash: string }>(
+        "SELECT password_hash FROM books WHERE id = $1",
+        [managed.id],
+      );
+      const { verifyPassword } = await import("../lib/password.js");
+      assert.equal(await verifyPassword("new-password-1", stored.rows[0].password_hash), true);
+      assert.equal(await verifyPassword("old-password", stored.rows[0].password_hash), false);
+
+      await queryWithRetry(
+        `INSERT INTO todos (id, book_id, title) VALUES ($1, $2, $3)`,
+        [randomUUID(), managed.id, `${runPrefix}cascade-todo`],
+      );
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/api/books/${managed.id}`,
+        headers: { "x-access-key": env.APP_ACCESS_KEY },
+        payload: { password: "new-password-1" },
+      });
+      assert.equal(deleted.statusCode, 204);
+      assert.equal(deleted.body, "");
+
+      const orphanBook = await queryWithRetry<{ total: number }>(
+        "SELECT COUNT(*)::int AS total FROM books WHERE id = $1",
+        [managed.id],
+      );
+      assert.equal(orphanBook.rows[0].total, 0);
+
+      const missingOuterKey = await app.inject({
+        method: "DELETE",
+        url: `/api/books/${managed.id}`,
+        payload: { password: "new-password-1" },
+      });
+      assert.equal(missingOuterKey.statusCode, 401);
+      assert.deepEqual(missingOuterKey.json(), { error: "unauthorized" });
+
+      const orphanTodos = await queryWithRetry<{ total: number }>(
+        "SELECT COUNT(*)::int AS total FROM todos WHERE book_id = $1",
+        [managed.id],
+      );
+      assert.equal(orphanTodos.rows[0].total, 0);
+    });
+
   } finally {
     await queryWithRetry("DELETE FROM books WHERE name LIKE $1", [`${runPrefix}%`]);
     await app.close();

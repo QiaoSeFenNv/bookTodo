@@ -186,6 +186,26 @@ export function unlockBook(accessKey: string, bookId: string, password: string) 
   });
 }
 
+export function updateBook(
+  accessKey: string,
+  bookId: string,
+  input: { currentPassword: string; name?: string; newPassword?: string },
+) {
+  return request<Book>(`/api/books/${bookId}`, {
+    method: "PATCH",
+    accessKey,
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteBook(accessKey: string, bookId: string, password: string) {
+  return request<void>(`/api/books/${bookId}`, {
+    method: "DELETE",
+    accessKey,
+    body: JSON.stringify({ password }),
+  });
+}
+
 export function listTodos(
   access: BookAccess,
   status: TodoFilter = "all",

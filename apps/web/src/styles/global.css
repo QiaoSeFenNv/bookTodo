@@ -1441,6 +1441,77 @@ button { cursor: pointer; }
   padding-top: 4px;
 }
 
+.bookshelf-grid > li { position: relative; }
+
+.book-manage-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 250, 240, 0.28);
+  border-radius: 50%;
+  background: rgba(17, 29, 28, 0.22);
+  color: rgba(255, 250, 240, 0.72);
+  opacity: 0;
+  transition: opacity 0.18s ease-out, background 0.18s ease-out, color 0.18s ease-out;
+}
+
+.bookshelf-grid > li:hover .book-manage-btn,
+.book-manage-btn:focus-visible {
+  opacity: 1;
+}
+
+.book-manage-btn:hover {
+  background: rgba(17, 29, 28, 0.42);
+  color: #fffaf0;
+}
+
+.danger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(140, 63, 69, 0.55);
+  border-radius: 999px;
+  background: rgba(140, 63, 69, 0.08);
+  color: #8c3f45;
+  font-weight: 600;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background: rgba(140, 63, 69, 0.92);
+  border-color: rgba(140, 63, 69, 0.92);
+  color: #fffaf0;
+}
+
+.danger-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.book-danger-zone {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(140, 63, 69, 0.35);
+}
+
+.book-danger-hint {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+}
+
+.manage-dialog .book-dialog-form + .book-danger-zone .book-dialog-form {
+  margin-top: 12px;
+}
+
 .journal-book-name {
   max-width: 180px;
   overflow: hidden;

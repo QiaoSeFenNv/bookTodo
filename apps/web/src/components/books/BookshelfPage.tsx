@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, LogOut, Plus, RefreshCw } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, LogOut, Plus, RefreshCw, Settings } from "lucide-react";
 import { BookUnlockDialog } from "./BookUnlockDialog";
 import { CreateBookDialog } from "./CreateBookDialog";
+import { ManageBookDialog } from "./ManageBookDialog";
 import { listBooks, type Book, type BookPage, type BookSession } from "../../lib/api";
 
 const PAGE_SIZE = 12;
@@ -25,6 +26,7 @@ export function BookshelfPage({ accessKey, onBookUnlocked, onLogout }: Bookshelf
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [managedBook, setManagedBook] = useState<Book | null>(null);
 
   const loadPage = useCallback(
     async (targetPage: number) => {
@@ -100,6 +102,15 @@ export function BookshelfPage({ accessKey, onBookUnlocked, onLogout }: Bookshelf
                   <strong>{book.name}</strong>
                   <time dateTime={book.createdAt}>{dateFormatter.format(new Date(book.createdAt))}</time>
                 </button>
+                <button
+                  type="button"
+                  className="book-manage-btn"
+                  aria-label={`管理“${book.name}”`}
+                  title="改名 / 修改密码 / 删除"
+                  onClick={() => setManagedBook(book)}
+                >
+                  <Settings size={15} aria-hidden="true" />
+                </button>
               </li>
             ))}
           </ul>
@@ -153,6 +164,23 @@ export function BookshelfPage({ accessKey, onBookUnlocked, onLogout }: Bookshelf
           onUnlocked={(session) => {
             setSelectedBook(null);
             onBookUnlocked(session);
+          }}
+          onUnauthorized={onLogout}
+        />
+      ) : null}
+
+      {managedBook ? (
+        <ManageBookDialog
+          accessKey={accessKey}
+          book={managedBook}
+          onClose={() => setManagedBook(null)}
+          onUpdated={() => {
+            setManagedBook(null);
+            void loadPage(page);
+          }}
+          onDeleted={() => {
+            setManagedBook(null);
+            void loadPage(page);
           }}
           onUnauthorized={onLogout}
         />

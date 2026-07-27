@@ -30,6 +30,20 @@ const unlockSchema = z.object({
   password: z.string().min(1).max(256),
 });
 
+const updateSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(256),
+    name: z.string().trim().min(1).max(80).optional(),
+    newPassword: z.string().min(8).max(128).optional(),
+  })
+  .refine((value) => value.name !== undefined || value.newPassword !== undefined, {
+    message: "nothing_to_update",
+  });
+
+const deleteSchema = z.object({
+  password: z.string().min(1).max(256),
+});
+
 type PublicBookRow = Pick<BookRow, "id" | "name" | "created_at">;
 
 function mapBook(row: PublicBookRow) {
@@ -147,6 +161,106 @@ export async function booksRoutes(app: FastifyInstance): Promise<void> {
         token: session.token,
         expiresAt: session.expiresAt,
       };
+    },
+  );
+
+  app.patch(
+    "/api/books/:id",
+    {
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = unlockParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply.code(400).send({ error: "invalid_id" });
+      }
+
+      const parsed = updateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+
+      const result = await queryWithRetry<BookRow>(
+        `SELECT id, name, password_hash, created_at, updated_at
+         FROM books
+         WHERE id = $1`,
+        [params.data.id],
+      );
+      if (result.rowCount === 0) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+
+      const row = result.rows[0];
+      if (!(await verifyPassword(parsed.data.currentPassword, row.password_hash))) {
+        return reply.code(401).send({ error: "book_unauthorized" });
+      }
+
+      const nextName = parsed.data.name ?? row.name;
+      const nextPasswordHash = parsed.data.newPassword
+        ? await hashPassword(parsed.data.newPassword)
+        : row.password_hash;
+
+      try {
+        const updated = await queryWithRetry<PublicBookRow>(
+          `UPDATE books
+           SET name = $2, password_hash = $3, updated_at = NOW()
+           WHERE id = $1
+           RETURNING id, name, created_at`,
+          [row.id, nextName, nextPasswordHash],
+        );
+        return mapBook(updated.rows[0]);
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          return reply.code(409).send({ error: "conflict" });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.delete(
+    "/api/books/:id",
+    {
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
+      const params = unlockParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        return reply.code(400).send({ error: "invalid_id" });
+      }
+
+      const parsed = deleteSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+
+      const result = await queryWithRetry<BookRow>(
+        `SELECT id, name, password_hash, created_at, updated_at
+         FROM books
+         WHERE id = $1`,
+        [params.data.id],
+      );
+      if (result.rowCount === 0) {
+        return reply.code(404).send({ error: "not_found" });
+      }
+
+      const row = result.rows[0];
+      if (!(await verifyPassword(parsed.data.password, row.password_hash))) {
+        return reply.code(401).send({ error: "book_unauthorized" });
+      }
+
+      await queryWithRetry("DELETE FROM books WHERE id = $1", [row.id]);
+      return reply.code(204).send();
     },
   );
 }
