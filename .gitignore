@@ -13,3 +13,4 @@ apps/server/public/
 .vite/
 *.tsbuildinfo
 .tmp-*
+.worktrees/
