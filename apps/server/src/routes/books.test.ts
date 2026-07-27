@@ -341,7 +341,7 @@ test("site and book authentication API", async (t) => {
         assert.deepEqual(invalidContext.json(), { error: "book_unauthorized" });
       }
     });
-  
+
   } finally {
     await queryWithRetry("DELETE FROM books WHERE name LIKE $1", [`${runPrefix}%`]);
     await app.close();
