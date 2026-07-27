@@ -34,21 +34,21 @@ Turn the current single-book personal todo application into a shared bookshelf w
 
 ## Acceptance Criteria
 
-- [ ] A visitor must pass the outer site password gate before the bookshelf or book-creation controls are available.
-- [ ] A new book can be created with a name and its own user-chosen password without creating an account.
-- [ ] A duplicate book name is rejected case-insensitively with a visible validation error.
-- [ ] The protected home page lists available books without revealing their todo or journal contents.
-- [ ] Selecting a book prompts for that book's password before opening it.
-- [ ] More books can be created without a product-defined fixed maximum.
-- [ ] Book discovery/management is paginated with stable ordering and explicit page metadata.
-- [ ] Correct credentials open only the selected book; incorrect credentials do not expose its data.
-- [ ] Todos, daily notes, available dates, and preferences are scoped to the authenticated book.
-- [ ] Record identifiers cannot be used to read, update, or delete records belonging to another book.
-- [ ] Logging out clears client authentication state and returns to the appropriate entry screen.
-- [ ] Existing single-book data is preserved and assigned to a documented legacy/default book during migration.
-- [ ] The migrated default book can initially be unlocked with `APP_ACCESS_KEY`, while PostgreSQL contains no plaintext copy of that password.
-- [ ] Existing in-book behavior and responsive styling continue to work.
-- [ ] Schema initialization, build, automated checks, and browser acceptance checks pass against local PostgreSQL.
+- [x] A visitor must pass the outer site password gate before the bookshelf or book-creation controls are available.
+- [x] A new book can be created with a name and its own user-chosen password without creating an account.
+- [x] A duplicate book name is rejected case-insensitively with a visible validation error.
+- [x] The protected home page lists available books without revealing their todo or journal contents.
+- [x] Selecting a book prompts for that book's password before opening it.
+- [x] More books can be created without a product-defined fixed maximum.
+- [x] Book discovery/management is paginated with stable ordering and explicit page metadata.
+- [x] Correct credentials open only the selected book; incorrect credentials do not expose its data.
+- [x] Todos, daily notes, available dates, and preferences are scoped to the authenticated book.
+- [x] Record identifiers cannot be used to read, update, or delete records belonging to another book.
+- [x] Logging out clears client authentication state and returns to the appropriate entry screen.
+- [x] Existing single-book data is preserved and assigned to a documented legacy/default book during migration.
+- [x] The migrated default book can initially be unlocked with `APP_ACCESS_KEY`, while PostgreSQL contains no plaintext copy of that password.
+- [x] Existing in-book behavior and responsive styling continue to work.
+- [x] Schema initialization, build, automated checks, and browser acceptance checks pass against local PostgreSQL.
 
 ## Out of Scope
 

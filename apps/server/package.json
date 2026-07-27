@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "test": "tsx --test --test-concurrency=1 src/lib/password.test.ts src/lib/book-session.test.ts src/routes/books.test.ts src/routes/book-data.test.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "db:init": "tsx src/db-init.ts"

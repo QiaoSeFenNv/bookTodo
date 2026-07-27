@@ -1,10 +1,12 @@
 # Book Todo 使用与部署说明
 
-Book Todo 是一个书本风格的个人待办与日记工作台。每个日期拥有独立的待办、时间线、总结、目标和备注，并通过访问密钥保护数据。
+Book Todo 是一个书本风格的共享任务书架。访客先用书房密码进入受保护的书架，再用每本任务书自己的密码解锁；书内继续提供按日期组织的待办、时间线、总结、目标和备注。
 
 ## 主要功能
 
-- 访问密钥解锁
+- 书房密码与书本密码双层解锁
+- 创建任意数量的独立任务书
+- 书架每页显示 12 本书
 - 按日期保存独立工作区
 - 左滑查看昨天，右滑查看明天
 - 支持日期按钮和键盘方向键切换
@@ -13,6 +15,18 @@ Book Todo 是一个书本风格的个人待办与日记工作台。每个日期�
 - 每日总结、目标和备注自动保存
 - PostgreSQL 持久化存储
 - 桌面端和移动端响应式书本界面
+
+## 双层密码与使用流程
+
+Book Todo 不创建用户账户。访问边界直接落在书房和任务书上：
+
+1. 输入 `.env` 中的 `APP_ACCESS_KEY` 进入私人书房。
+2. 在书架创建任务书时设置名称和至少 8 个字符的独立密码。
+3. 点击任意任务书并重新输入该书密码后，才会加载它的待办和日记。
+4. `返回书架` 会先保存当前日记，只清除书本会话；再次打开任何书都要重新输入书本密码。
+5. `退出书房` 会同时清除书房密码和书本会话。
+
+书架 API 默认每页 12 本，单次最多 24 本。任务书名称去除首尾空白后按大小写不敏感规则保持唯一。当前版本不提供改名、删除、修改或找回书本密码的界面。
 
 ## 技术栈
 
@@ -69,7 +83,7 @@ WEB_ORIGIN=https://todo.example.com
 |---|---|---|
 | `PORT` | 否 | 服务端口，默认 `3000` |
 | `DATABASE_URL` | 是 | PostgreSQL 连接地址 |
-| `APP_ACCESS_KEY` | 是 | 页面解锁密钥，请使用强随机值 |
+| `APP_ACCESS_KEY` | 是 | 外层书房密码，也是迁移后的默认书本初始密码；请使用强随机值 |
 | `NODE_ENV` | 否 | `development`、`test` 或 `production` |
 | `WEB_ORIGIN` | 否 | 开发环境前端地址，默认 `http://localhost:5173` |
 
@@ -146,11 +160,16 @@ apps/server/src/sql/001_init.sql
 
 脚本可以重复执行，不会删除已有业务数据。它负责创建或补齐以下表：
 
+### `books`
+
+保存任务书目录、大小写不敏感的唯一名称、`scrypt` 密码哈希和创建时间。接口不会返回 `password_hash`。
+
 ### `todos`
 
 保存按日期归属的待办和时间线项目，主要字段包括：
 
 - `id`：UUID 主键
+- `book_id`：所属任务书，删除任务书时级联清理
 - `title`：待办标题
 - `date_key`：工作区日期
 - `is_done`：完成状态
@@ -160,11 +179,15 @@ apps/server/src/sql/001_init.sql
 
 ### `daily_notes`
 
-保存每天的书写内容：`summary`、`goals`、`notes` 和更新时间，以 `date_key` 为主键。
+保存每天的书写内容：`summary`、`goals`、`notes` 和更新时间，以 `(book_id, date_key)` 为联合主键。
 
 ### `user_prefs`
 
-保存单用户界面偏好，初始化时会自动写入一条默认记录。
+保存每本任务书的界面偏好，以 `(book_id, id)` 为联合主键，并在每本书内保留 `id = 1` 的约定。
+
+### 旧数据迁移
+
+首次运行新版 `npm run db:init` 时，旧的单书数据会被分配到固定 ID `00000000-0000-4000-8000-000000000001`、名称为 `我的待办书` 的默认书。它的初始书本密码等于迁移当时的 `APP_ACCESS_KEY`，数据库只保存同样的 `scrypt` 哈希，不保存明文。初始化可重复运行，不会重置已有默认书密码。
 
 应用启动时也会执行安全的增量建表逻辑，但生产部署仍建议显式执行 `npm run db:init`，让数据库错误在重启服务前暴露。
 
@@ -185,7 +208,7 @@ npm run dev
 - 前端：`http://localhost:5173`
 - API 健康检查：`http://localhost:3000/api/health`
 
-使用 `.env` 中的 `APP_ACCESS_KEY` 解锁页面。
+先使用 `.env` 中的 `APP_ACCESS_KEY` 进入书房。首次迁移后，`我的待办书` 也使用同一个值作为初始书本密码。
 
 Windows + WSL Docker 环境也可以运行：
 
@@ -296,20 +319,13 @@ Script Path: Jenkinsfile
 http://<服务器公网 IP>:28889
 ```
 
-应用对普通 API 按来源 IP 限制为每分钟 60 次请求，对解锁校验限制为每分钟 5 次，超限返回 HTTP `429`。连续 5 次输入错误的解锁密钥后，Book Todo 进程会主动退出且容器不会自动重启；需要管理员在服务器上手动重新启动。服务器安全组或防火墙只需放行 TCP `28889`，不要开放 PostgreSQL 的 `5432` 端口。
+应用按来源 IP 对书房密码验证和书本解锁分别限制为每分钟 5 次，超限返回 HTTP `429`；普通待办和日记请求不共享密码尝试计数器。错误密码不会停止共享服务。服务器安全组或防火墙只需放行 TCP `28889`，不要开放 PostgreSQL 的 `5432` 端口。
 
-解锁失败导致服务停止后，检查日志并手动恢复：
-
-```bash
-docker logs --tail 100 book-todo
-docker compose --env-file .env -f docker-compose.prod.yml up -d
-```
-
-直接使用 HTTP 时，解锁密钥不会被加密传输。公网长期使用仍建议后续配置独立域名和 HTTPS；不要修改当前服务 `renti-agent` 使用的 Nginx 配置来完成本次部署。
+密码通过请求体传输。公网部署必须使用 HTTPS，否则书房密码和书本密码都可能在传输途中泄露；不要修改当前服务 `renti-agent` 使用的 Nginx 配置来完成本次部署。
 
 ## 数据备份
 
-部署或升级前建议备份：
+部署或升级前，尤其是首次执行多书迁移前，必须先备份：
 
 ```bash
 pg_dump "$DATABASE_URL" > book_todo_backup.sql
@@ -321,6 +337,8 @@ pg_dump "$DATABASE_URL" > book_todo_backup.sql
 psql "$DATABASE_URL" < book_todo_backup.sql
 ```
 
+一旦第二本书写入数据，不要再运行旧版单书应用。旧版查询没有 `book_id` 条件，会混合不同书的数据；完整回滚必须先停止应用，再恢复迁移前的数据库备份。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -329,6 +347,7 @@ psql "$DATABASE_URL" < book_todo_backup.sql
 | `npm run build` | 构建前端和后端 |
 | `npm run db:init` | 创建或升级数据库表结构 |
 | `npm run start` | 启动生产服务 |
+| `npm run check:multi-book` | 验证多书 API、数据隔离和迁移一致性 |
 | `npm run check:ui` | 执行浏览器与 API 验收检查 |
 
 ## 常见问题
@@ -349,10 +368,11 @@ pg_isready -d "$DATABASE_URL"
 
 检查：
 
-1. `APP_ACCESS_KEY` 是否与页面输入一致。
-2. `/api/health` 是否返回 `db: true`。
-3. PostgreSQL 用户是否有表的读写权限。
-4. 日志中是否存在 `401` 或数据库错误。
+1. 书房页面输入的值是否与 `APP_ACCESS_KEY` 一致。
+2. 是否为当前选中的任务书输入了正确的书本密码。
+3. `/api/health` 是否返回 `db: true`。
+4. PostgreSQL 用户是否有表的读写权限。
+5. 日志中是否存在 `unauthorized`、`book_unauthorized` 或数据库错误。
 
 ## 项目目录
 

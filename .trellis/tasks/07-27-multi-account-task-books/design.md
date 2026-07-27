@@ -6,7 +6,7 @@ The application currently has one global `APP_ACCESS_KEY` and three unscoped Pos
 
 ## Chosen Architecture
 
-Use shared business tables with a mandatory `book_id` ownership column. Keep `APP_ACCESS_KEY` as the outer site credential. Hash each book password with Node's built-in `scrypt`, and exchange a successful book unlock for a short-lived HMAC-signed book token. All book data routes require both the outer access key and the signed book token.
+Use shared business tables with a mandatory `book_id` ownership column. Keep `APP_ACCESS_KEY` as the outer site credential. Hash each book password with Node's built-in `scrypt`, and exchange a successful book unlock for a short-lived HMAC-signed book token. The signing key is random server-only process state and is never derived from a credential shared with visitors. All book data routes require both the outer access key and the signed book token.
 
 ```text
 Outer password
@@ -75,7 +75,7 @@ Existing rows are never deleted or rewritten beyond assigning ownership. Re-runn
 
 `password.ts` owns a versioned storage format containing algorithm, cost parameters, random salt, and derived key. Verification decodes the stored format defensively and uses `timingSafeEqual`. Passwords are accepted only in request bodies over the existing HTTP deployment; README must retain the HTTPS warning for public deployment.
 
-`book-session.ts` signs a compact base64url payload with HMAC-SHA256 using a key derived from `APP_ACCESS_KEY`. The payload contains `bookId`, `issuedAt`, and `expiresAt`; validity is 12 hours. Signature, UUID shape, and expiry are verified before a request receives a book context. Changing `APP_ACCESS_KEY` invalidates all book tokens.
+`book-session.ts` signs a compact base64url payload with HMAC-SHA256 using a random 256-bit key generated when the server process starts. The payload contains `bookId`, `issuedAt`, and `expiresAt`; validity is 12 hours. Signature, UUID shape, canonical lifetime, and expiry are verified before a request receives a book context. The key is never sent to the browser or persisted. Restarting the server invalidates all book tokens and returns visitors to per-book unlock, which is acceptable for this single-process private deployment and prevents anyone who knows the outer password from forging a book token.
 
 Outer verification and book unlock each have a strict rate limit. The existing global process-exit counter is removed: in a shared deployment it lets accidental or hostile password attempts stop the service for every legitimate user.
 

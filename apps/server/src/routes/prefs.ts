@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { queryWithRetry, type UserPrefsRow } from "../db.js";
-import { requireAccessKey } from "../middleware/access-key.js";
+import { requireBookAccess } from "../middleware/book-access.js";
 
 const patchSchema = z
   .object({
@@ -21,9 +21,10 @@ function mapPrefs(row: UserPrefsRow) {
   };
 }
 
-async function ensurePrefsRow(): Promise<UserPrefsRow> {
+async function ensurePrefsRow(bookId: string): Promise<UserPrefsRow> {
   const existing = await queryWithRetry<UserPrefsRow>(
-    "SELECT * FROM user_prefs WHERE id = 1",
+    "SELECT * FROM user_prefs WHERE book_id = $1 AND id = 1",
+    [bookId],
   );
   if (existing.rowCount && existing.rows[0]) {
     return existing.rows[0];
@@ -31,20 +32,21 @@ async function ensurePrefsRow(): Promise<UserPrefsRow> {
 
   const inserted = await queryWithRetry<UserPrefsRow>(
     `
-      INSERT INTO user_prefs (id, template_mode)
-      VALUES (1, 'A')
-      ON CONFLICT (id) DO UPDATE SET updated_at = user_prefs.updated_at
+      INSERT INTO user_prefs (book_id, id, template_mode)
+      VALUES ($1, 1, 'A')
+      ON CONFLICT (book_id, id) DO UPDATE SET updated_at = user_prefs.updated_at
       RETURNING *
     `,
+    [bookId],
   );
   return inserted.rows[0];
 }
 
 export async function prefsRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook("preHandler", requireAccessKey);
+  app.addHook("preHandler", requireBookAccess);
 
-  app.get("/api/prefs", async () => {
-    const row = await ensurePrefsRow();
+  app.get("/api/prefs", async (request) => {
+    const row = await ensurePrefsRow(request.bookId);
     return mapPrefs(row);
   });
 
@@ -54,7 +56,7 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "invalid_request" });
     }
 
-    const current = await ensurePrefsRow();
+    const current = await ensurePrefsRow(request.bookId);
     const nextMode = parsed.data.template_mode ?? current.template_mode;
     const nextSpread =
       parsed.data.last_spread_id !== undefined
@@ -67,10 +69,10 @@ export async function prefsRoutes(app: FastifyInstance): Promise<void> {
         SET template_mode = $1,
             last_spread_id = $2,
             updated_at = NOW()
-        WHERE id = 1
+        WHERE book_id = $3 AND id = 1
         RETURNING *
       `,
-      [nextMode, nextSpread],
+      [nextMode, nextSpread, request.bookId],
     );
 
     return mapPrefs(result.rows[0]);

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import dotenv from "dotenv";
+import pg from "pg";
 import { chromium } from "playwright-core";
+
+const { Client } = pg;
+dotenv.config({ path: path.resolve(".env") });
 
 const edgePath =
   process.env.EDGE_PATH ??
@@ -9,8 +15,14 @@ const edgePath =
 const baseUrl = process.env.WEB_URL ?? "http://127.0.0.1:5173";
 const apiUrl = process.env.API_URL ?? "http://127.0.0.1:3000";
 const accessKey = process.env.APP_ACCESS_KEY ?? "book-todo-dev-key";
-const outputDir = path.resolve("artifacts", "ui-check");
+const databaseUrl = process.env.DATABASE_URL;
+assert(databaseUrl, "DATABASE_URL is required");
+const legacyBookName = "我的待办书";
+const outputDir = path.resolve("output", "playwright", "multi-book");
 const runId = Date.now();
+const bookPrefix = `浏览器验收任务书-${runId}-`;
+const createdBookName = `${bookPrefix}新书`;
+const createdBookPassword = `Ui-check-${runId}!`;
 const titlePrefix = `浏览器验收待办-${runId}`;
 const shortTitle = `${titlePrefix}-短记`;
 const renamedShortTitle = `${titlePrefix}-已编辑`;
@@ -43,14 +55,35 @@ const tomorrow = shiftDateKey(today, 1);
 await fs.mkdir(outputDir, { recursive: true });
 
 const browser = await chromium.launch({ executablePath: edgePath, headless: true });
+let bookToken = "";
 
-async function api(pathname, { method = "GET", body } = {}) {
+async function siteApi(pathname, { method = "GET", body } = {}) {
   const headers = { "X-Access-Key": accessKey };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const response = await fetch(`${apiUrl}${pathname}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  try {
+    return { ok: response.ok, status: response.status, data: JSON.parse(text) };
+  } catch {
+    return { ok: response.ok, status: response.status, data: text };
+  }
+}
+
+async function api(pathname, options = {}) {
+  assert(bookToken, "book token must be initialized before book data requests");
+  const headers = {
+    "X-Access-Key": accessKey,
+    "X-Book-Token": bookToken,
+  };
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(`${apiUrl}${pathname}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
   const text = await response.text();
   try {
@@ -70,6 +103,49 @@ async function cleanupTestTodos() {
   );
 }
 
+async function ensurePaginationFixtures() {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const countResult = await client.query("SELECT COUNT(*)::int AS total FROM books");
+    const needed = Math.max(0, 13 - countResult.rows[0].total);
+    if (needed === 0) return;
+    const hashResult = await client.query(
+      "SELECT password_hash FROM books WHERE name = $1",
+      [legacyBookName],
+    );
+    assert(hashResult.rows[0]?.password_hash, "legacy password hash is missing");
+    for (let index = 0; index < needed; index += 1) {
+      await client.query(
+        `INSERT INTO books (id, name, password_hash, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW() + ($4 * INTERVAL '1 millisecond'), NOW())`,
+        [
+          randomUUID(),
+          `${bookPrefix}分页-${String(index + 1).padStart(2, "0")}`,
+          hashResult.rows[0].password_hash,
+          index,
+        ],
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+async function cleanupTestBooks() {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    assert(bookPrefix.startsWith("浏览器验收任务书-"));
+    await client.query(
+      "DELETE FROM books WHERE LEFT(name, LENGTH($1)) = $1",
+      [bookPrefix],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
 async function seedTodo(title, dateKey) {
   const response = await api("/api/todos", {
     method: "POST",
@@ -83,6 +159,9 @@ async function waitForNotes(expected, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const response = await api(`/api/day-notes?date=${today}`);
+    if (response.status === 429) {
+      assert.fail("rate limited while verifying daily writing persistence");
+    }
     if (
       response.ok &&
       response.data?.summary === expected.summary &&
@@ -91,12 +170,23 @@ async function waitForNotes(expected, timeoutMs = 10000) {
     ) {
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   assert.fail("daily writing fields were not persisted");
 }
 
-async function unlock(page, { testWrongKey = false } = {}) {
+async function assertNoHorizontalOverflow(page, label) {
+  const dimensions = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  assert(
+    dimensions.document <= dimensions.viewport,
+    `${label} has horizontal overflow: ${dimensions.document} > ${dimensions.viewport}`,
+  );
+}
+
+async function enterBookshelf(page, { testWrongKey = false } = {}) {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   const gate = page.locator(".gate-stage");
   await gate.waitFor({ timeout: 10000 });
@@ -104,15 +194,70 @@ async function unlock(page, { testWrongKey = false } = {}) {
 
   if (testWrongKey) {
     await page.getByLabel("访问密钥").fill(`wrong-${runId}`);
-    await page.getByRole("button", { name: "解锁", exact: true }).click();
+    await page.getByRole("button", { name: "进入书房", exact: true }).click();
     await page.getByRole("alert").waitFor();
-    assert.match(await page.getByRole("alert").textContent(), /密钥不对/);
+    assert.match(await page.getByRole("alert").textContent(), /密码不对/);
   }
 
   await page.getByLabel("访问密钥").fill(accessKey);
-  await page.getByRole("button", { name: "解锁", exact: true }).click();
+  await page.getByRole("button", { name: "进入书房", exact: true }).click();
   await page.locator('[data-lock-state="open"]').waitFor({ timeout: 5000 });
+  await page.locator(".bookshelf-page").waitFor({ timeout: 10000 });
+}
+
+async function selectBook(page, name) {
+  await page.locator(".book-tile").first().waitFor({ timeout: 10000 });
+  const paginationText = await page.locator(".bookshelf-pagination span").textContent();
+  let currentPage = Number(paginationText?.match(/第\s*(\d+)/)?.[1] ?? 1);
+  const totalPages = Number(paginationText?.match(/\/\s*(\d+)/)?.[1] ?? 1);
+  for (let attempt = 0; attempt < totalPages; attempt += 1) {
+    const bookButton = page.getByRole("button", { name, exact: true });
+    if ((await bookButton.count()) > 0) {
+      await bookButton.click();
+      return;
+    }
+    if (currentPage >= totalPages) break;
+    const nextPage = currentPage + 1;
+    await page.getByRole("button", { name: "下一页" }).click();
+    await page.locator(`.bookshelf-grid[data-page="${nextPage}"]`).waitFor();
+    currentPage = nextPage;
+  }
+  assert.fail(`book was not found on the shelf: ${name}`);
+}
+
+async function openBook(page, name, password, { testWrongPassword = false } = {}) {
+  await selectBook(page, name);
+  await page.getByRole("dialog", { name: `解锁“${name}”` }).waitFor();
+  if (testWrongPassword) {
+    await page.getByLabel("书本密码").fill(`wrong-${runId}`);
+    await page.getByRole("button", { name: "打开这本书", exact: true }).click();
+    await page.getByRole("alert").waitFor();
+    assert.match(await page.getByRole("alert").textContent(), /密码不对/);
+  }
+  await page.getByLabel("书本密码").fill(password);
+  await page.getByRole("button", { name: "打开这本书", exact: true }).click();
   await page.locator(".pane-list").waitFor({ timeout: 10000 });
+}
+
+async function createBookThroughUi(page) {
+  await page.getByRole("button", { name: "创建任务书", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "创建任务书" });
+  await dialog.waitFor();
+  await page.screenshot({ path: path.join(outputDir, "desktop-create-dialog.png") });
+  await page.getByLabel("任务书名称").fill(createdBookName);
+  await page.getByLabel("书本密码", { exact: true }).fill(createdBookPassword);
+  await page.getByLabel("确认书本密码").fill(`${createdBookPassword}-different`);
+  await page.getByRole("button", { name: "创建", exact: true }).click();
+  await page.getByRole("alert").waitFor();
+  assert.match(await page.getByRole("alert").textContent(), /不一致/);
+  await page.getByLabel("确认书本密码").fill(createdBookPassword);
+  const response = page.waitForResponse(
+    (candidate) => candidate.url().endsWith("/api/books") && candidate.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "创建", exact: true }).click();
+  assert.equal((await response).status(), 201);
+  await dialog.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: createdBookName, exact: true }).waitFor();
 }
 
 async function waitForDate(page, dateKey) {
@@ -141,6 +286,18 @@ let mobileLayout;
 let originalNotes;
 
 try {
+  await ensurePaginationFixtures();
+  const booksResponse = await siteApi("/api/books?page=1&pageSize=24");
+  assert.equal(booksResponse.ok, true, "could not list books for browser setup");
+  const legacyBook = booksResponse.data.items.find((book) => book.name === legacyBookName);
+  assert(legacyBook, "legacy book is missing");
+  const unlockResponse = await siteApi(`/api/books/${legacyBook.id}/unlock`, {
+    method: "POST",
+    body: { password: accessKey },
+  });
+  assert.equal(unlockResponse.status, 200, "could not unlock legacy book for browser setup");
+  bookToken = unlockResponse.data.token;
+
   await cleanupTestTodos();
   const notesResponse = await api(`/api/day-notes?date=${today}`);
   assert.equal(notesResponse.ok, true, "could not read existing daily notes");
@@ -193,7 +350,34 @@ try {
   assert(lockedBook.x >= 0 && lockedBook.x + lockedBook.width <= 1440);
   await desktopPage.screenshot({ path: path.join(outputDir, "desktop-locked.png") });
 
-  await unlock(desktopPage, { testWrongKey: true });
+  await enterBookshelf(desktopPage, { testWrongKey: true });
+  await assertNoHorizontalOverflow(desktopPage, "desktop bookshelf");
+  await desktopPage.screenshot({
+    path: path.join(outputDir, "desktop-bookshelf.png"),
+    fullPage: true,
+  });
+  await desktopPage.getByRole("button", { name: "下一页" }).click();
+  await desktopPage.getByText(/第 2 \//).waitFor();
+  await desktopPage.getByRole("button", { name: "上一页" }).click();
+  await desktopPage.getByText(/第 1 \//).waitFor();
+
+  await createBookThroughUi(desktopPage);
+  await selectBook(desktopPage, createdBookName);
+  await desktopPage.screenshot({ path: path.join(outputDir, "desktop-unlock-dialog.png") });
+  await desktopPage.getByLabel("书本密码").fill(`wrong-${runId}`);
+  await desktopPage.getByRole("button", { name: "打开这本书", exact: true }).click();
+  await desktopPage.getByRole("alert").waitFor();
+  assert.match(await desktopPage.getByRole("alert").textContent(), /密码不对/);
+  await desktopPage.getByLabel("书本密码").fill(createdBookPassword);
+  await desktopPage.getByRole("button", { name: "打开这本书", exact: true }).click();
+  await desktopPage.locator(".pane-list").waitFor({ timeout: 10000 });
+  await desktopPage.getByRole("button", { name: "返回书架" }).click();
+  await desktopPage.locator(".bookshelf-page").waitFor();
+  await selectBook(desktopPage, createdBookName);
+  await desktopPage.getByRole("dialog", { name: `解锁“${createdBookName}”` }).waitFor();
+  await desktopPage.getByRole("button", { name: "关闭解锁窗口" }).click();
+
+  await openBook(desktopPage, legacyBookName, accessKey);
   await waitForDate(desktopPage, today);
   const todayDetailRequests = detailRequests.filter((request) => request.date === today);
   if (indexedAtUnlock.has(today)) {
@@ -251,6 +435,7 @@ try {
   await endTrigger.press("ArrowDown");
   const endHours = desktopPage.getByRole("listbox", { name: "结束时间小时" });
   await endHours.waitFor();
+  await endHours.focus();
   await desktopPage.keyboard.press("ArrowDown");
   await desktopPage.keyboard.press("Escape");
   await desktopPage.getByRole("button", { name: /结束时间，当前 11:00/ }).waitFor();
@@ -338,7 +523,28 @@ try {
     fullPage: true,
   });
 
-  await desktopPage.getByRole("button", { name: "锁上" }).click();
+  const flushedNotes = { ...noteValues, notes: `${noteValues.notes}-返回书架` };
+  await desktopPage.getByLabel("备注").fill(flushedNotes.notes);
+  const rejectSave = async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "test_save_failure" }),
+    });
+  };
+  await desktopPage.route("**/api/day-notes", rejectSave);
+  await desktopPage.getByRole("button", { name: "返回书架" }).click();
+  await desktopPage.getByText("日记内容保存失败，请稍后重试。").waitFor();
+  assert.equal(await desktopPage.locator(".bookshelf-page").count(), 0);
+  assert.equal(await desktopPage.locator(".journal-book").count(), 1);
+  await desktopPage.unroute("**/api/day-notes", rejectSave);
+  await desktopPage.getByRole("button", { name: "返回书架" }).click();
+  await desktopPage.locator(".bookshelf-page").waitFor();
+  await waitForNotes(flushedNotes);
+  await selectBook(desktopPage, legacyBookName);
+  await desktopPage.getByRole("dialog", { name: `解锁“${legacyBookName}”` }).waitFor();
+  await desktopPage.getByRole("button", { name: "关闭解锁窗口" }).click();
+  await desktopPage.getByRole("button", { name: "退出书房", exact: true }).click();
   await desktopPage.locator('[data-lock-state="locked"]').waitFor();
   await desktop.close();
 
@@ -347,7 +553,21 @@ try {
     reducedMotion: "reduce",
   });
   const mobilePage = await mobile.newPage();
-  await unlock(mobilePage);
+  await mobilePage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await mobilePage.locator(".gate-stage").waitFor();
+  await mobilePage.screenshot({ path: path.join(outputDir, "mobile-locked.png") });
+  await enterBookshelf(mobilePage);
+  await assertNoHorizontalOverflow(mobilePage, "mobile bookshelf");
+  await mobilePage.screenshot({
+    path: path.join(outputDir, "mobile-bookshelf.png"),
+    fullPage: true,
+  });
+  await selectBook(mobilePage, legacyBookName);
+  await mobilePage.getByRole("dialog", { name: `解锁“${legacyBookName}”` }).waitFor();
+  await mobilePage.screenshot({ path: path.join(outputDir, "mobile-unlock-dialog.png") });
+  await mobilePage.getByLabel("书本密码").fill(accessKey);
+  await mobilePage.getByRole("button", { name: "打开这本书", exact: true }).click();
+  await mobilePage.locator(".pane-list").waitFor({ timeout: 10000 });
   await waitForDate(mobilePage, today);
   const mobileStart = mobilePage.getByRole("button", { name: /开始时间/ });
   await mobileStart.click();
@@ -383,10 +603,13 @@ try {
   });
   await mobile.close();
 } finally {
-  await cleanupTestTodos();
-  if (originalNotes) {
-    await api("/api/day-notes", { method: "PUT", body: { date: today, ...originalNotes } });
+  if (bookToken) {
+    await cleanupTestTodos();
+    if (originalNotes) {
+      await api("/api/day-notes", { method: "PUT", body: { date: today, ...originalNotes } });
+    }
   }
+  await cleanupTestBooks();
   await browser.close();
 }
 

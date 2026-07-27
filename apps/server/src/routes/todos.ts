@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { queryWithRetry, type TodoRow } from "../db.js";
 import { dateString, formatDate } from "../lib/date.js";
-import { requireAccessKey } from "../middleware/access-key.js";
+import { requireBookAccess } from "../middleware/book-access.js";
 
 const timeString = z
   .string()
@@ -101,7 +101,7 @@ function mapTodo(row: TodoRow) {
 }
 
 export async function todoRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook("preHandler", requireAccessKey);
+  app.addHook("preHandler", requireBookAccess);
 
   app.get("/api/todos", async (request, reply) => {
     const query = listQuerySchema.safeParse(request.query);
@@ -109,8 +109,8 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "invalid_query" });
     }
 
-    const clauses: string[] = [];
-    const params: unknown[] = [];
+    const clauses: string[] = ["book_id = $1"];
+    const params: unknown[] = [request.bookId];
 
     if (query.data.status === "active") clauses.push("is_done = FALSE");
     if (query.data.status === "done") clauses.push("is_done = TRUE");
@@ -129,6 +129,7 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
       `
         SELECT
           id,
+          book_id,
           title,
           is_done,
           date_key::text AS date_key,
@@ -171,15 +172,17 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
 
     const result = await queryWithRetry<TodoRow>(
       `
-        INSERT INTO todos (id, title, page_key, scheduled_start, scheduled_end, notes, date_key)
-        VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, CURRENT_DATE))
+        INSERT INTO todos (
+          book_id, id, title, page_key, scheduled_start, scheduled_end, notes, date_key
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE))
         RETURNING
-          id, title, is_done, date_key::text AS date_key, page_key, sort_order,
+          id, book_id, title, is_done, date_key::text AS date_key, page_key, sort_order,
           scheduled_start::text AS scheduled_start,
           scheduled_end::text AS scheduled_end,
           notes, created_at, updated_at, completed_at
       `,
-      [id, title, pageKey, scheduledStart, scheduledEnd, notes, dateKey],
+      [request.bookId, id, title, pageKey, scheduledStart, scheduledEnd, notes, dateKey],
     );
 
     return reply.code(201).send(mapTodo(result.rows[0]));
@@ -199,13 +202,13 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
     const existing = await queryWithRetry<TodoRow>(
       `
         SELECT
-          id, title, is_done, date_key::text AS date_key, page_key, sort_order,
+          id, book_id, title, is_done, date_key::text AS date_key, page_key, sort_order,
           scheduled_start::text AS scheduled_start,
           scheduled_end::text AS scheduled_end,
           notes, created_at, updated_at, completed_at
-        FROM todos WHERE id = $1
+        FROM todos WHERE id = $1 AND book_id = $2
       `,
-      [params.data.id],
+      [params.data.id, request.bookId],
     );
 
     if (existing.rowCount === 0) {
@@ -258,9 +261,9 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
             notes = $8,
             completed_at = $9,
             updated_at = NOW()
-        WHERE id = $1
+        WHERE id = $1 AND book_id = $10
         RETURNING
-          id, title, is_done, date_key::text AS date_key, page_key, sort_order,
+          id, book_id, title, is_done, date_key::text AS date_key, page_key, sort_order,
           scheduled_start::text AS scheduled_start,
           scheduled_end::text AS scheduled_end,
           notes, created_at, updated_at, completed_at
@@ -275,6 +278,7 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
         nextEnd,
         nextNotes,
         completedAt,
+        request.bookId,
       ],
     );
 
@@ -287,7 +291,10 @@ export async function todoRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "invalid_id" });
     }
 
-    const result = await queryWithRetry("DELETE FROM todos WHERE id = $1", [params.data.id]);
+    const result = await queryWithRetry(
+      "DELETE FROM todos WHERE id = $1 AND book_id = $2",
+      [params.data.id, request.bookId],
+    );
     if (result.rowCount === 0) {
       return reply.code(404).send({ error: "not_found" });
     }

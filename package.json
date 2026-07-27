@@ -13,6 +13,7 @@
     "start": "npm run start -w @book-todo/server",
     "db:init": "npm run db:init -w @book-todo/server",
     "local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1",
+    "check:multi-book": "npm test -w @book-todo/server && node scripts/check-multi-book.mjs",
     "check:ui": "node scripts/check-ui.mjs"
   },
   "devDependencies": {

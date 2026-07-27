@@ -22,6 +22,31 @@ export type UserPrefs = {
   updatedAt: string;
 };
 
+export type Book = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
+
+export type BookPage = {
+  items: Book[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+};
+
+export type BookSession = {
+  book: Book;
+  token: string;
+  expiresAt: string;
+};
+
+export type BookAccess = {
+  accessKey: string;
+  bookToken: string;
+};
+
 export type CreateTodoInput = {
   title: string;
   dateKey?: string;
@@ -42,6 +67,7 @@ export type UpdateTodoInput = {
 };
 
 const ACCESS_KEY_STORAGE = "book-todo.access-key";
+const BOOK_SESSION_STORAGE = "book-todo.book-session";
 
 export function loadAccessKey(): string {
   return sessionStorage.getItem(ACCESS_KEY_STORAGE) ?? "";
@@ -55,9 +81,46 @@ export function clearAccessKey(): void {
   sessionStorage.removeItem(ACCESS_KEY_STORAGE);
 }
 
+function isBookSession(value: unknown): value is BookSession {
+  if (!value || typeof value !== "object") return false;
+  const session = value as Partial<BookSession>;
+  const book = session.book as Partial<Book> | undefined;
+  return (
+    typeof session.token === "string" &&
+    session.token.length > 0 &&
+    typeof session.expiresAt === "string" &&
+    Number.isFinite(Date.parse(session.expiresAt)) &&
+    Boolean(book) &&
+    typeof book?.id === "string" &&
+    typeof book.name === "string" &&
+    typeof book.createdAt === "string"
+  );
+}
+
+export function loadBookSession(): BookSession | null {
+  const stored = sessionStorage.getItem(BOOK_SESSION_STORAGE);
+  if (!stored) return null;
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (isBookSession(parsed)) return parsed;
+  } catch {
+    // Invalid browser state is handled as a locked book.
+  }
+  sessionStorage.removeItem(BOOK_SESSION_STORAGE);
+  return null;
+}
+
+export function saveBookSession(session: BookSession): void {
+  sessionStorage.setItem(BOOK_SESSION_STORAGE, JSON.stringify(session));
+}
+
+export function clearBookSession(): void {
+  sessionStorage.removeItem(BOOK_SESSION_STORAGE);
+}
+
 async function request<T>(
   path: string,
-  options: RequestInit & { accessKey?: string } = {},
+  options: RequestInit & { accessKey?: string; bookToken?: string } = {},
 ): Promise<T> {
   const headers = new Headers(options.headers ?? {});
   if (options.body !== undefined && options.body !== null) {
@@ -65,6 +128,9 @@ async function request<T>(
   }
   if (options.accessKey) {
     headers.set("X-Access-Key", options.accessKey);
+  }
+  if (options.bookToken) {
+    headers.set("X-Book-Token", options.bookToken);
   }
 
   const response = await fetch(path, {
@@ -93,8 +159,35 @@ export function verifyAccessKey(accessKey: string) {
   });
 }
 
-export function listTodos(
+export function listBooks(accessKey: string, page = 1, pageSize = 12) {
+  const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  return request<BookPage>(`/api/books?${query.toString()}`, {
+    method: "GET",
+    accessKey,
+  });
+}
+
+export function createBook(
   accessKey: string,
+  input: { name: string; password: string },
+) {
+  return request<Book>("/api/books", {
+    method: "POST",
+    accessKey,
+    body: JSON.stringify(input),
+  });
+}
+
+export function unlockBook(accessKey: string, bookId: string, password: string) {
+  return request<BookSession>(`/api/books/${bookId}/unlock`, {
+    method: "POST",
+    accessKey,
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function listTodos(
+  access: BookAccess,
   status: TodoFilter = "all",
   date?: string,
 ) {
@@ -104,11 +197,11 @@ export function listTodos(
   const suffix = query.size ? `?${query.toString()}` : "";
   return request<{ items: Todo[] }>(`/api/todos${suffix}`, {
     method: "GET",
-    accessKey,
+    ...access,
   });
 }
 
-export function createTodo(accessKey: string, input: CreateTodoInput | string) {
+export function createTodo(access: BookAccess, input: CreateTodoInput | string) {
   const body =
     typeof input === "string"
       ? { title: input }
@@ -123,15 +216,15 @@ export function createTodo(accessKey: string, input: CreateTodoInput | string) {
 
   return request<Todo>("/api/todos", {
     method: "POST",
-    accessKey,
+    ...access,
     body: JSON.stringify(body),
   });
 }
 
-export function updateTodo(accessKey: string, id: string, patch: UpdateTodoInput) {
+export function updateTodo(access: BookAccess, id: string, patch: UpdateTodoInput) {
   return request<Todo>(`/api/todos/${id}`, {
     method: "PATCH",
-    accessKey,
+    ...access,
     body: JSON.stringify({
       title: patch.title,
       is_done: patch.isDone,
@@ -144,34 +237,34 @@ export function updateTodo(accessKey: string, id: string, patch: UpdateTodoInput
   });
 }
 
-export function deleteTodo(accessKey: string, id: string) {
+export function deleteTodo(access: BookAccess, id: string) {
   return request<void>(`/api/todos/${id}`, {
     method: "DELETE",
-    accessKey,
+    ...access,
   });
 }
 
-export function listAvailableDays(accessKey: string) {
+export function listAvailableDays(access: BookAccess) {
   return request<{ dates: string[] }>("/api/days", {
     method: "GET",
-    accessKey,
+    ...access,
   });
 }
 
-export function getPrefs(accessKey: string) {
+export function getPrefs(access: BookAccess) {
   return request<UserPrefs>("/api/prefs", {
     method: "GET",
-    accessKey,
+    ...access,
   });
 }
 
 export function updatePrefs(
-  accessKey: string,
+  access: BookAccess,
   patch: { templateMode?: TemplateMode; lastSpreadId?: string | null },
 ) {
   return request<UserPrefs>("/api/prefs", {
     method: "PATCH",
-    accessKey,
+    ...access,
     body: JSON.stringify({
       template_mode: patch.templateMode,
       last_spread_id: patch.lastSpreadId,
@@ -187,20 +280,20 @@ export type DayNotes = {
   updatedAt: string | null;
 };
 
-export function getDayNotes(accessKey: string, date: string) {
+export function getDayNotes(access: BookAccess, date: string) {
   return request<DayNotes>(`/api/day-notes?date=${date}`, {
     method: "GET",
-    accessKey,
+    ...access,
   });
 }
 
 export function saveDayNotes(
-  accessKey: string,
+  access: BookAccess,
   input: { date: string; summary?: string; goals?: string; notes?: string },
 ) {
   return request<DayNotes>("/api/day-notes", {
     method: "PUT",
-    accessKey,
+    ...access,
     body: JSON.stringify(input),
   });
 }

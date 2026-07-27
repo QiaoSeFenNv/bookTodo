@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { queryWithRetry } from "../db.js";
 import { dateString, formatDate } from "../lib/date.js";
-import { requireAccessKey } from "../middleware/access-key.js";
+import { requireBookAccess } from "../middleware/book-access.js";
 
 type DayNotesRow = {
   date_key: string | Date;
@@ -30,7 +30,7 @@ function mapNotes(row: DayNotesRow) {
 }
 
 export async function dayNotesRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook("preHandler", requireAccessKey);
+  app.addHook("preHandler", requireBookAccess);
 
   app.get("/api/day-notes", async (request, reply) => {
     const query = z.object({ date: dateString }).safeParse(request.query);
@@ -39,8 +39,10 @@ export async function dayNotesRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const result = await queryWithRetry<DayNotesRow>(
-      "SELECT date_key::text AS date_key, summary, goals, notes, updated_at FROM daily_notes WHERE date_key = $1",
-      [query.data.date],
+      `SELECT date_key::text AS date_key, summary, goals, notes, updated_at
+         FROM daily_notes
+        WHERE book_id = $1 AND date_key = $2`,
+      [request.bookId, query.data.date],
     );
 
     if (result.rowCount === 0) {
@@ -64,16 +66,16 @@ export async function dayNotesRoutes(app: FastifyInstance): Promise<void> {
     const { date, summary, goals, notes } = parsed.data;
     const result = await queryWithRetry<DayNotesRow>(
       `
-        INSERT INTO daily_notes (date_key, summary, goals, notes, updated_at)
-        VALUES ($1, COALESCE($2, ''), COALESCE($3, ''), COALESCE($4, ''), NOW())
-        ON CONFLICT (date_key) DO UPDATE SET
-          summary = COALESCE($2, daily_notes.summary),
-          goals = COALESCE($3, daily_notes.goals),
-          notes = COALESCE($4, daily_notes.notes),
+        INSERT INTO daily_notes (book_id, date_key, summary, goals, notes, updated_at)
+        VALUES ($1, $2, COALESCE($3, ''), COALESCE($4, ''), COALESCE($5, ''), NOW())
+        ON CONFLICT (book_id, date_key) DO UPDATE SET
+          summary = COALESCE($3, daily_notes.summary),
+          goals = COALESCE($4, daily_notes.goals),
+          notes = COALESCE($5, daily_notes.notes),
           updated_at = NOW()
         RETURNING date_key::text AS date_key, summary, goals, notes, updated_at
       `,
-      [date, summary ?? null, goals ?? null, notes ?? null],
+      [request.bookId, date, summary ?? null, goals ?? null, notes ?? null],
     );
 
     return mapNotes(result.rows[0]);

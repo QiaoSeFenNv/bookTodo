@@ -107,7 +107,7 @@ export function AccessGate({ initialKey = "", onSuccess }: AccessGateProps) {
       const message = caught instanceof Error ? caught.message : "request_failed";
       setError(
         message === "unauthorized"
-          ? "密钥不对，书还锁着呢。"
+          ? "密码不对，书房还锁着呢。"
           : "暂时无法连接服务，请稍后重试。",
       );
       setShake((n) => n + 1);
@@ -129,9 +129,9 @@ export function AccessGate({ initialKey = "", onSuccess }: AccessGateProps) {
           {/* pages block (visible when cover opens) */}
           <div className="gate-book-pages">
             <div className="gate-firstpage">
-              <p className="gate-firstpage-eyebrow">Chapter · Today</p>
-              <h2>新的一页</h2>
-              <p className="gate-firstpage-line">正在为你翻开…</p>
+              <p className="gate-firstpage-eyebrow">Private library</p>
+              <h2>任务书架</h2>
+              <p className="gate-firstpage-line">正在打开书房…</p>
             </div>
           </div>
 
@@ -153,8 +153,8 @@ export function AccessGate({ initialKey = "", onSuccess }: AccessGateProps) {
           >
             <div className="gate-cover-face">
               <div className="gate-cover-frame">
-                <p className="gate-cover-eyebrow">Private Notebook</p>
-                <h1 className="gate-cover-title">我的待办书</h1>
+                <p className="gate-cover-eyebrow">Private study</p>
+                <h1 className="gate-cover-title">私人书房</h1>
                 <motion.div
                   className="gate-lock"
                   key={shake}
@@ -167,7 +167,7 @@ export function AccessGate({ initialKey = "", onSuccess }: AccessGateProps) {
                   />
                 </motion.div>
                 <p className="gate-cover-hint">
-                  {lockState === "locked" ? "这本书上了锁" : "解锁成功"}
+                  {lockState === "locked" ? "书房已上锁" : "验证成功"}
                 </p>
                 <motion.form
                   className="gate-form"
@@ -183,7 +183,7 @@ export function AccessGate({ initialKey = "", onSuccess }: AccessGateProps) {
                     type="password"
                     value={accessKey}
                     onChange={(event) => setAccessKey(event.target.value)}
-                    placeholder="输入访问密钥"
+                    placeholder="输入书房密码"
                     aria-label="访问密钥"
                     aria-describedby={error ? "gate-error" : undefined}
                     aria-invalid={Boolean(error)}
@@ -191,7 +191,7 @@ export function AccessGate({ initialKey = "", onSuccess }: AccessGateProps) {
                     required
                   />
                   <button type="submit" disabled={loading || !accessKey.trim()}>
-                    {loading ? "开锁中…" : "解锁"}
+                    {loading ? "验证中…" : "进入书房"}
                   </button>
                   {error ? (
                     <p id="gate-error" className="gate-error" role="alert">

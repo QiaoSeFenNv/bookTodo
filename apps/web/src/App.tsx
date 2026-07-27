@@ -4,25 +4,32 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  LockKeyhole,
+  Library,
   Plus,
   RefreshCw,
   Trash2,
 } from "lucide-react";
 import { AccessGate } from "./components/auth/AccessGate";
+import { BookshelfPage } from "./components/books/BookshelfPage";
 import { TimePicker } from "./components/todo/TimePicker";
 import {
   clearAccessKey,
+  clearBookSession,
   createTodo,
   deleteTodo,
   getDayNotes,
   listAvailableDays,
   listTodos,
   loadAccessKey,
+  loadBookSession,
   saveAccessKey,
+  saveBookSession,
   saveDayNotes,
   type Todo,
+  type BookAccess,
+  type BookSession,
   updateTodo,
+  verifyAccessKey,
 } from "./lib/api";
 import { dateFromKey, formatDateLabel, shiftDateKey, todayKey } from "./lib/date";
 import { quoteForDate } from "./lib/quotes";
@@ -170,7 +177,9 @@ function TimelineItem({
 export default function App() {
   const reduceMotion = useReducedMotion();
   const [accessKey, setAccessKey] = useState(() => loadAccessKey());
-  const [authorized, setAuthorized] = useState(false);
+  const [siteAuthorized, setSiteAuthorized] = useState(false);
+  const [bookSession, setBookSession] = useState<BookSession | null>(() => loadBookSession());
+  const [bookOpen, setBookOpen] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(Boolean(loadAccessKey()));
   const [entering, setEntering] = useState(false);
 
@@ -223,6 +232,50 @@ export default function App() {
     ? Math.round((doneTodos.length / todos.length) * 100)
     : 0;
 
+  const bookAccess = useMemo<BookAccess | null>(
+    () =>
+      accessKey && bookSession
+        ? { accessKey, bookToken: bookSession.token }
+        : null,
+    [accessKey, bookSession],
+  );
+
+  const resetWorkspace = useCallback(() => {
+    if (notesTimer.current) window.clearTimeout(notesTimer.current);
+    loadRevision.current += 1;
+    const today = todayKey();
+    selectedDateRef.current = today;
+    setSelectedDate(today);
+    setTodos([]);
+    setSummary("");
+    setGoals("");
+    setNotes("");
+    setDraft("");
+    setTlTitle("");
+    setTlError("");
+    setNotesStatus("idle");
+    notesLoaded.current = false;
+    notesRevision.current = 0;
+    savedNotesRevision.current = 0;
+    notesSaveQueue.current = Promise.resolve();
+    setAvailableDates(new Set());
+    setError("");
+  }, []);
+
+  const closeBook = useCallback(() => {
+    clearBookSession();
+    setBookSession(null);
+    setBookOpen(false);
+    resetWorkspace();
+  }, [resetWorkspace]);
+
+  const closeSite = useCallback(() => {
+    clearAccessKey();
+    setAccessKey("");
+    setSiteAuthorized(false);
+    closeBook();
+  }, [closeBook]);
+
   const runMutation = useCallback(async <T,>(operation: () => Promise<T>) => {
     setError("");
     try {
@@ -230,28 +283,30 @@ export default function App() {
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "request_failed";
       if (message === "unauthorized") {
-        clearAccessKey();
-        setAccessKey("");
-        setAuthorized(false);
+        closeSite();
+        return null;
+      }
+      if (message === "book_unauthorized") {
+        closeBook();
         return null;
       }
       setError("同步失败，请确认服务与数据库已启动。");
       return null;
     }
-  }, []);
+  }, [closeBook, closeSite]);
 
   const persistDayNotes = useCallback(
     async (
-      key: string,
+      access: BookAccess,
       date: string,
       values: { summary: string; goals: string; notes: string },
       revision: number,
     ) => {
-      if (!notesLoaded.current || revision <= savedNotesRevision.current) return;
+      if (!notesLoaded.current || revision <= savedNotesRevision.current) return true;
       setNotesStatus("saving");
       try {
         const request = notesSaveQueue.current.then(async () => {
-          await saveDayNotes(key, { date, ...values });
+          await saveDayNotes(access, { date, ...values });
         });
         notesSaveQueue.current = request.catch(() => undefined);
         await request;
@@ -262,27 +317,31 @@ export default function App() {
         if (values.summary.trim() || values.goals.trim() || values.notes.trim()) {
           setAvailableDates((current) => new Set(current).add(date));
         }
-        void listAvailableDays(key)
+        void listAvailableDays(access)
           .then((result) => setAvailableDates(new Set(result.dates)))
           .catch(() => undefined);
+        return true;
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "request_failed";
         if (message === "unauthorized") {
-          clearAccessKey();
-          setAccessKey("");
-          setAuthorized(false);
-          return;
+          closeSite();
+          return false;
+        }
+        if (message === "book_unauthorized") {
+          closeBook();
+          return false;
         }
         if (selectedDateRef.current === date) {
           setNotesStatus("error");
           setError("日记内容保存失败，请稍后重试。");
         }
+        return false;
       }
     },
-    [],
+    [closeBook, closeSite],
   );
 
-  const loadDay = useCallback(async (key: string, date: string, knownDates: Set<string>) => {
+  const loadDay = useCallback(async (access: BookAccess, date: string, knownDates: Set<string>) => {
     const revision = ++loadRevision.current;
     setLoading(true);
     setError("");
@@ -303,8 +362,8 @@ export default function App() {
 
     try {
       const [todoResult, dayNotes] = await Promise.all([
-        listTodos(key, "all", date),
-        getDayNotes(key, date),
+        listTodos(access, "all", date),
+        getDayNotes(access, date),
       ]);
       if (revision !== loadRevision.current || selectedDateRef.current !== date) return;
       setTodos(todoResult.items);
@@ -319,9 +378,9 @@ export default function App() {
       if (revision !== loadRevision.current) return;
       const message = caught instanceof Error ? caught.message : "load_failed";
       if (message === "unauthorized") {
-        clearAccessKey();
-        setAccessKey("");
-        setAuthorized(false);
+        closeSite();
+      } else if (message === "book_unauthorized") {
+        closeBook();
       } else {
         setError("读取这一天的数据失败，请稍后重试。");
         setNotesStatus("error");
@@ -329,26 +388,26 @@ export default function App() {
     } finally {
       if (revision === loadRevision.current) setLoading(false);
     }
-  }, []);
+  }, [closeBook, closeSite]);
 
-  const bootstrap = useCallback(
-    async (key: string) => {
+  const bootstrapBook = useCallback(
+    async (access: BookAccess) => {
       setLoading(true);
       setError("");
       try {
-        const result = await listAvailableDays(key);
+        const result = await listAvailableDays(access);
         const dates = new Set(result.dates);
         setAvailableDates(dates);
-        setAuthorized(true);
-        await loadDay(key, selectedDateRef.current, dates);
+        setBookOpen(true);
+        await loadDay(access, selectedDateRef.current, dates);
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "load_failed";
         if (message === "unauthorized") {
-          clearAccessKey();
-          setAccessKey("");
-          setAuthorized(false);
+          closeSite();
+        } else if (message === "book_unauthorized") {
+          closeBook();
         } else {
-          setAuthorized(true);
+          setBookOpen(true);
           setError("读取日期索引失败，请稍后重试。");
         }
       } finally {
@@ -356,7 +415,7 @@ export default function App() {
         setBootstrapping(false);
       }
     },
-    [loadDay],
+    [closeBook, closeSite, loadDay],
   );
 
   useEffect(() => {
@@ -366,17 +425,27 @@ export default function App() {
       setBootstrapping(false);
       return;
     }
-    void bootstrap(accessKey);
-  }, [accessKey, bootstrap]);
+    void verifyAccessKey(accessKey)
+      .then(async () => {
+        setSiteAuthorized(true);
+        if (bookSession) {
+          await bootstrapBook({ accessKey, bookToken: bookSession.token });
+        }
+      })
+      .catch(() => {
+        closeSite();
+      })
+      .finally(() => setBootstrapping(false));
+  }, [accessKey, bookSession, bootstrapBook, closeSite]);
 
   useEffect(() => {
-    if (!authorized || !accessKey || !notesLoaded.current) return;
+    if (!bookOpen || !bookAccess || !notesLoaded.current) return;
     const revision = notesRevision.current;
     if (revision <= savedNotesRevision.current) return;
     if (notesTimer.current) window.clearTimeout(notesTimer.current);
     notesTimer.current = window.setTimeout(() => {
       void persistDayNotes(
-        accessKey,
+        bookAccess,
         selectedDate,
         { summary, goals, notes },
         revision,
@@ -385,7 +454,7 @@ export default function App() {
     return () => {
       if (notesTimer.current) window.clearTimeout(notesTimer.current);
     };
-  }, [summary, goals, notes, authorized, accessKey, selectedDate, persistDayNotes]);
+  }, [summary, goals, notes, bookOpen, bookAccess, selectedDate, persistDayNotes]);
 
   function markNotesChanged() {
     notesRevision.current += 1;
@@ -396,45 +465,46 @@ export default function App() {
   }
 
   const flushDayNotes = useCallback(async () => {
-    if (!accessKey || !notesLoaded.current) return;
+    if (!bookAccess || !notesLoaded.current) return true;
     if (notesTimer.current) window.clearTimeout(notesTimer.current);
-    await persistDayNotes(
-      accessKey,
+    return persistDayNotes(
+      bookAccess,
       selectedDateRef.current,
       { summary, goals, notes },
       notesRevision.current,
     );
-  }, [accessKey, goals, notes, persistDayNotes, summary]);
+  }, [bookAccess, goals, notes, persistDayNotes, summary]);
 
   const refreshWorkspace = useCallback(async () => {
-    if (!accessKey) return;
+    if (!bookAccess) return;
     setLoading(true);
     setError("");
     try {
-      const result = await listAvailableDays(accessKey);
+      const result = await listAvailableDays(bookAccess);
       const dates = new Set(result.dates);
       setAvailableDates(dates);
-      await loadDay(accessKey, selectedDateRef.current, dates);
+      await loadDay(bookAccess, selectedDateRef.current, dates);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "load_failed";
       if (message === "unauthorized") {
-        clearAccessKey();
-        setAccessKey("");
-        setAuthorized(false);
+        closeSite();
+      } else if (message === "book_unauthorized") {
+        closeBook();
       } else {
         setError("刷新失败，请稍后重试。");
       }
     } finally {
       setLoading(false);
     }
-  }, [accessKey, loadDay]);
+  }, [bookAccess, closeBook, closeSite, loadDay]);
 
   const navigateDay = useCallback(
     async (offset: -1 | 1) => {
-      if (!accessKey || navigating.current) return;
+      if (!bookAccess || navigating.current) return;
       navigating.current = true;
       try {
-        await flushDayNotes();
+        const notesSaved = await flushDayNotes();
+        if (!notesSaved) return;
         const nextDate = shiftDateKey(selectedDateRef.current, offset);
         selectedDateRef.current = nextDate;
         setDayDirection(offset);
@@ -442,16 +512,16 @@ export default function App() {
         setDraft("");
         setTlTitle("");
         setTlError("");
-        await loadDay(accessKey, nextDate, availableDates);
+        await loadDay(bookAccess, nextDate, availableDates);
       } finally {
         navigating.current = false;
       }
     },
-    [accessKey, availableDates, flushDayNotes, loadDay],
+    [bookAccess, availableDates, flushDayNotes, loadDay],
   );
 
   useEffect(() => {
-    if (!authorized) return;
+    if (!bookOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isInteractiveTarget(event.target)) return;
       if (event.key === "ArrowLeft") {
@@ -464,41 +534,40 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [authorized, navigateDay]);
+  }, [bookOpen, navigateDay]);
 
-  function handleAuthorized(key: string) {
+  const handleAuthorized = useCallback((key: string) => {
     saveAccessKey(key);
     setAccessKey(key);
+    setSiteAuthorized(true);
     setEntering(true);
-    void bootstrap(key).then(() => {
-      window.setTimeout(() => setEntering(false), 60);
-    });
-  }
+    window.setTimeout(() => setEntering(false), 60);
+  }, []);
 
-  function handleLogout() {
-    void flushDayNotes();
-    if (notesTimer.current) window.clearTimeout(notesTimer.current);
-    loadRevision.current += 1;
-    clearAccessKey();
-    setAccessKey("");
-    setAuthorized(false);
-    setTodos([]);
-    setSummary("");
-    setGoals("");
-    setNotes("");
-    setNotesStatus("idle");
-    notesLoaded.current = false;
-    notesRevision.current = 0;
-    savedNotesRevision.current = 0;
-    setAvailableDates(new Set());
+  const handleBookUnlocked = useCallback(
+    (session: BookSession) => {
+      saveBookSession(session);
+      setBookSession(session);
+      setEntering(true);
+      void bootstrapBook({ accessKey, bookToken: session.token }).finally(() => {
+        window.setTimeout(() => setEntering(false), 60);
+      });
+    },
+    [accessKey, bootstrapBook],
+  );
+
+  const handleOuterLogout = useCallback(() => closeSite(), [closeSite]);
+
+  async function handleReturnToShelf() {
+    if (await flushDayNotes()) closeBook();
   }
 
   async function handleCreateDot(e: React.FormEvent) {
     e.preventDefault();
-    if (!accessKey || !draft.trim()) return;
+    if (!bookAccess || !draft.trim()) return;
     const date = selectedDateRef.current;
     const created = await runMutation(() =>
-      createTodo(accessKey, { title: draft.trim(), dateKey: date, pageKey: "inbox" }),
+      createTodo(bookAccess, { title: draft.trim(), dateKey: date, pageKey: "inbox" }),
     );
     if (created) {
       if (selectedDateRef.current === date) setTodos((cur) => [created, ...cur]);
@@ -510,14 +579,14 @@ export default function App() {
   async function handleCreateTimeline(e: React.FormEvent) {
     e.preventDefault();
     setTlError("");
-    if (!accessKey || !tlTitle.trim()) return;
+    if (!bookAccess || !tlTitle.trim()) return;
     if (!isValidTimeRange(tlStart, tlEnd)) {
       setTlError("结束时间需要晚于开始时间");
       return;
     }
     const date = selectedDateRef.current;
     const created = await runMutation(() =>
-      createTodo(accessKey, {
+      createTodo(bookAccess, {
         title: tlTitle.trim(),
         dateKey: date,
         pageKey: "schedule",
@@ -533,9 +602,9 @@ export default function App() {
   }
 
   async function handleToggle(todo: Todo) {
-    if (!accessKey) return;
+    if (!bookAccess) return;
     const updated = await runMutation(() =>
-      updateTodo(accessKey, todo.id, { isDone: !todo.isDone }),
+      updateTodo(bookAccess, todo.id, { isDone: !todo.isDone }),
     );
     if (updated && updated.dateKey === selectedDateRef.current) {
       setTodos((cur) => cur.map((t) => (t.id === todo.id ? updated : t)));
@@ -543,24 +612,24 @@ export default function App() {
   }
 
   async function handleRename(todo: Todo, title: string) {
-    if (!accessKey) return;
-    const updated = await runMutation(() => updateTodo(accessKey, todo.id, { title }));
+    if (!bookAccess) return;
+    const updated = await runMutation(() => updateTodo(bookAccess, todo.id, { title }));
     if (updated && updated.dateKey === selectedDateRef.current) {
       setTodos((cur) => cur.map((t) => (t.id === todo.id ? updated : t)));
     }
   }
 
   async function handleDelete(todo: Todo) {
-    if (!accessKey) return;
+    if (!bookAccess) return;
     const ok = await runMutation(async () => {
-      await deleteTodo(accessKey, todo.id);
+      await deleteTodo(bookAccess, todo.id);
       return true;
     });
     if (ok) {
       if (todo.dateKey === selectedDateRef.current) {
         setTodos((cur) => cur.filter((t) => t.id !== todo.id));
       }
-      void listAvailableDays(accessKey)
+      void listAvailableDays(bookAccess)
         .then((result) => setAvailableDates(new Set(result.dates)))
         .catch(() => undefined);
     }
@@ -571,13 +640,23 @@ export default function App() {
   if (bootstrapping) {
     return (
       <div className="gate-scene">
-        <p className="boot-hint">正在打开你的书…</p>
+        <p className="boot-hint">正在打开书房…</p>
       </div>
     );
   }
 
-  if (!authorized) {
+  if (!siteAuthorized) {
     return <AccessGate initialKey={accessKey} onSuccess={handleAuthorized} />;
+  }
+
+  if (!bookOpen || !bookSession) {
+    return (
+      <BookshelfPage
+        accessKey={accessKey}
+        onBookUnlocked={handleBookUnlocked}
+        onLogout={handleOuterLogout}
+      />
+    );
   }
 
   return (
@@ -611,6 +690,7 @@ export default function App() {
         {/* 书页顶部 */}
         <header className="journal-header">
           <div className="journal-date">
+            <span className="journal-book-name">{bookSession.book.name}</span>
             <div className="journal-date-nav">
               <button
                 type="button"
@@ -658,11 +738,11 @@ export default function App() {
             <button
               type="button"
               className="ghost-btn"
-              aria-label="锁上"
-              title="锁上"
-              onClick={handleLogout}
+              aria-label="返回书架"
+              title="返回书架"
+              onClick={() => void handleReturnToShelf()}
             >
-              <LockKeyhole size={15} aria-hidden="true" />
+              <Library size={15} aria-hidden="true" />
             </button>
           </div>
         </header>

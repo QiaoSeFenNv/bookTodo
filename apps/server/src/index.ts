@@ -7,6 +7,7 @@ import path from "node:path";
 import { env, paths } from "./config.js";
 import { ensureSchema, pingDb } from "./db.js";
 import { authRoutes } from "./routes/auth.js";
+import { booksRoutes } from "./routes/books.js";
 import { dayNotesRoutes } from "./routes/day-notes.js";
 import { dayIndexRoutes } from "./routes/days.js";
 import { prefsRoutes } from "./routes/prefs.js";
@@ -19,13 +20,17 @@ async function buildServer() {
 
   await app.register(cors, {
     origin: env.NODE_ENV === "production" ? false : env.WEB_ORIGIN,
-    allowedHeaders: ["Content-Type", "X-Access-Key", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "X-Access-Key",
+      "X-Book-Token",
+      "Authorization",
+    ],
   });
 
   await app.register(async (api) => {
     await api.register(rateLimit, {
-      max: 60,
-      timeWindow: "1 minute",
+      global: false,
     });
 
     api.get("/api/health", async (_request, reply) => {
@@ -48,6 +53,7 @@ async function buildServer() {
     });
 
     await api.register(authRoutes);
+    await api.register(booksRoutes);
     await api.register(todoRoutes);
     await api.register(prefsRoutes);
     await api.register(dayNotesRoutes);
