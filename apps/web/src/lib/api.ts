@@ -271,6 +271,35 @@ export function listAvailableDays(access: BookAccess) {
   });
 }
 
+export type CalendarDay = {
+  date: string;
+  total: number;
+  done: number;
+  hasNotes: boolean;
+  level: "high" | "medium" | "low" | "none";
+};
+
+export function getCalendar(access: BookAccess) {
+  return request<{ days: CalendarDay[] }>("/api/calendar", {
+    method: "GET",
+    ...access,
+  });
+}
+
+export function copyDayTodos(
+  access: BookAccess,
+  input: { sourceDate: string; targetDate: string },
+) {
+  return request<{ copied: number; items: Todo[] }>("/api/todos/copy", {
+    method: "POST",
+    ...access,
+    body: JSON.stringify({
+      source_date: input.sourceDate,
+      target_date: input.targetDate,
+    }),
+  });
+}
+
 export function getPrefs(access: BookAccess) {
   return request<UserPrefs>("/api/prefs", {
     method: "GET",

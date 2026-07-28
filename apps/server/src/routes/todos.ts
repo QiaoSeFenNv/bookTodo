@@ -100,8 +100,55 @@ function mapTodo(row: TodoRow) {
   };
 }
 
+const copySchema = z.object({
+  source_date: dateString,
+  target_date: dateString,
+});
+
 export async function todoRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", requireBookAccess);
+
+  app.post("/api/todos/copy", async (request, reply) => {
+    const parsed = copySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    if (parsed.data.source_date === parsed.data.target_date) {
+      return reply.code(400).send({ error: "same_date" });
+    }
+
+    const result = await queryWithRetry<TodoRow>(
+      `
+        INSERT INTO todos (
+          book_id, id, title, page_key, sort_order, scheduled_start, scheduled_end, notes, date_key
+        )
+        SELECT
+          $2,
+          gen_random_uuid(),
+          title,
+          page_key,
+          sort_order,
+          scheduled_start,
+          scheduled_end,
+          notes,
+          $3::date
+        FROM todos
+        WHERE book_id = $2 AND date_key = $1::date
+        ORDER BY sort_order ASC, created_at ASC
+        RETURNING
+          id, book_id, title, is_done, date_key::text AS date_key, page_key, sort_order,
+          scheduled_start::text AS scheduled_start,
+          scheduled_end::text AS scheduled_end,
+          notes, created_at, updated_at, completed_at
+      `,
+      [parsed.data.source_date, request.bookId, parsed.data.target_date],
+    );
+
+    return {
+      copied: result.rowCount ?? 0,
+      items: result.rows.map(mapTodo),
+    };
+  });
 
   app.get("/api/todos", async (request, reply) => {
     const query = listQuerySchema.safeParse(request.query);

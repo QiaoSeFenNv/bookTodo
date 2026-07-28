@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Library,
   Plus,
   RefreshCw,
@@ -11,20 +13,24 @@ import {
 } from "lucide-react";
 import { AccessGate } from "./components/auth/AccessGate";
 import { BookshelfPage } from "./components/books/BookshelfPage";
+import { CalendarDialog } from "./components/book/CalendarDialog";
+import { CopyDayDialog } from "./components/book/CopyDayDialog";
 import { TimePicker } from "./components/todo/TimePicker";
 import {
   clearAccessKey,
   clearBookSession,
+  copyDayTodos,
   createTodo,
   deleteTodo,
+  getCalendar,
   getDayNotes,
-  listAvailableDays,
   listTodos,
   loadAccessKey,
   loadBookSession,
   saveAccessKey,
   saveBookSession,
   saveDayNotes,
+  type CalendarDay,
   type Todo,
   type BookAccess,
   type BookSession,
@@ -188,6 +194,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [availableDates, setAvailableDates] = useState<Set<string>>(() => new Set());
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [dayDirection, setDayDirection] = useState(0);
 
   const [draft, setDraft] = useState("");
@@ -240,6 +249,19 @@ export default function App() {
     [accessKey, bookSession],
   );
 
+  const refreshCalendar = useCallback(
+    async (access: BookAccess) => {
+      try {
+        const result = await getCalendar(access);
+        setCalendarDays(result.days);
+        setAvailableDates(new Set(result.days.map((day) => day.date)));
+      } catch {
+        // Calendar metadata is best-effort; the day view stays usable without it.
+      }
+    },
+    [],
+  );
+
   const resetWorkspace = useCallback(() => {
     if (notesTimer.current) window.clearTimeout(notesTimer.current);
     loadRevision.current += 1;
@@ -259,6 +281,9 @@ export default function App() {
     savedNotesRevision.current = 0;
     notesSaveQueue.current = Promise.resolve();
     setAvailableDates(new Set());
+    setCalendarDays([]);
+    setCalendarOpen(false);
+    setCopyOpen(false);
     setError("");
   }, []);
 
@@ -317,9 +342,7 @@ export default function App() {
         if (values.summary.trim() || values.goals.trim() || values.notes.trim()) {
           setAvailableDates((current) => new Set(current).add(date));
         }
-        void listAvailableDays(access)
-          .then((result) => setAvailableDates(new Set(result.dates)))
-          .catch(() => undefined);
+        void refreshCalendar(access);
         return true;
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "request_failed";
@@ -338,7 +361,7 @@ export default function App() {
         return false;
       }
     },
-    [closeBook, closeSite],
+    [closeBook, closeSite, refreshCalendar],
   );
 
   const loadDay = useCallback(async (access: BookAccess, date: string, knownDates: Set<string>) => {
@@ -395,8 +418,9 @@ export default function App() {
       setLoading(true);
       setError("");
       try {
-        const result = await listAvailableDays(access);
-        const dates = new Set(result.dates);
+        const result = await getCalendar(access);
+        const dates = new Set(result.days.map((day) => day.date));
+        setCalendarDays(result.days);
         setAvailableDates(dates);
         setBookOpen(true);
         await loadDay(access, selectedDateRef.current, dates);
@@ -480,10 +504,8 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      const result = await listAvailableDays(bookAccess);
-      const dates = new Set(result.dates);
-      setAvailableDates(dates);
-      await loadDay(bookAccess, selectedDateRef.current, dates);
+      await refreshCalendar(bookAccess);
+      await loadDay(bookAccess, selectedDateRef.current, availableDates);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "load_failed";
       if (message === "unauthorized") {
@@ -496,7 +518,24 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [bookAccess, closeBook, closeSite, loadDay]);
+  }, [bookAccess, availableDates, closeBook, closeSite, loadDay, refreshCalendar]);
+
+  const goToDate = useCallback(
+    async (date: string, direction?: number) => {
+      if (!bookAccess) return;
+      const current = selectedDateRef.current;
+      if (date === current) return;
+      const dir = direction ?? (date > current ? -1 : 1);
+      selectedDateRef.current = date;
+      setDayDirection(dir);
+      setSelectedDate(date);
+      setDraft("");
+      setTlTitle("");
+      setTlError("");
+      await loadDay(bookAccess, date, availableDates);
+    },
+    [bookAccess, availableDates, loadDay],
+  );
 
   const navigateDay = useCallback(
     async (offset: -1 | 1) => {
@@ -506,18 +545,12 @@ export default function App() {
         const notesSaved = await flushDayNotes();
         if (!notesSaved) return;
         const nextDate = shiftDateKey(selectedDateRef.current, offset);
-        selectedDateRef.current = nextDate;
-        setDayDirection(offset);
-        setSelectedDate(nextDate);
-        setDraft("");
-        setTlTitle("");
-        setTlError("");
-        await loadDay(bookAccess, nextDate, availableDates);
+        await goToDate(nextDate, offset);
       } finally {
         navigating.current = false;
       }
     },
-    [bookAccess, availableDates, flushDayNotes, loadDay],
+    [bookAccess, flushDayNotes, goToDate],
   );
 
   useEffect(() => {
@@ -629,10 +662,33 @@ export default function App() {
       if (todo.dateKey === selectedDateRef.current) {
         setTodos((cur) => cur.filter((t) => t.id !== todo.id));
       }
-      void listAvailableDays(bookAccess)
-        .then((result) => setAvailableDates(new Set(result.dates)))
-        .catch(() => undefined);
+      void refreshCalendar(bookAccess);
     }
+  }
+
+  async function handleSelectCalendarDate(date: string) {
+    setCalendarOpen(false);
+    if (date === selectedDateRef.current) return;
+    const notesSaved = await flushDayNotes();
+    if (!notesSaved) return;
+    await goToDate(date);
+  }
+
+  async function handleCopyDay(sourceDate: string): Promise<number | false> {
+    if (!bookAccess) return false;
+    const date = selectedDateRef.current;
+    const result = await runMutation(() =>
+      copyDayTodos(bookAccess, { sourceDate, targetDate: date }),
+    );
+    if (!result) return false;
+    if (result.copied > 0) {
+      if (selectedDateRef.current === date) {
+        setTodos((cur) => [...result.items, ...cur]);
+      }
+      setAvailableDates((current) => new Set(current).add(date));
+      void refreshCalendar(bookAccess);
+    }
+    return result.copied;
   }
 
   /* ---------- 渲染 ---------- */
@@ -725,6 +781,24 @@ export default function App() {
             <span className="journal-quote">「{quote}」</span>
           </div>
           <div className="journal-actions">
+            <button
+              type="button"
+              className="ghost-btn"
+              aria-label="日历检索"
+              title="日历检索"
+              onClick={() => setCalendarOpen(true)}
+            >
+              <CalendarDays size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="ghost-btn"
+              aria-label="复制某一天到当前"
+              title="复制某一天到当前"
+              onClick={() => setCopyOpen(true)}
+            >
+              <Copy size={15} aria-hidden="true" />
+            </button>
             <button
               type="button"
               className="ghost-btn"
@@ -965,6 +1039,25 @@ export default function App() {
           </motion.div>
         </AnimatePresence>
       </motion.div>
+
+      {calendarOpen ? (
+        <CalendarDialog
+          days={calendarDays}
+          selectedDate={selectedDate}
+          today={todayKey()}
+          onSelect={(date) => void handleSelectCalendarDate(date)}
+          onClose={() => setCalendarOpen(false)}
+        />
+      ) : null}
+
+      {copyOpen ? (
+        <CopyDayDialog
+          days={calendarDays}
+          targetDate={selectedDate}
+          onClose={() => setCopyOpen(false)}
+          onCopy={handleCopyDay}
+        />
+      ) : null}
     </div>
   );
 }

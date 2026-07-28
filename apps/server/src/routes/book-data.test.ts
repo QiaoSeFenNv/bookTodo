@@ -7,7 +7,7 @@ import { pool, queryWithRetry } from "../db.js";
 import { createBookToken } from "../lib/book-session.js";
 import { hashPassword } from "../lib/password.js";
 import { dayNotesRoutes } from "./day-notes.js";
-import { dayIndexRoutes } from "./days.js";
+import { completionLevel, dayIndexRoutes } from "./days.js";
 import { prefsRoutes } from "./prefs.js";
 import { todoRoutes } from "./todos.js";
 
@@ -179,6 +179,95 @@ test("book data routes isolate todos, notes, days, and preferences", async () =>
       headers: headers(tokenA),
     });
     assert.equal(ownerStillHasTodo.json().items[0].id, todoAId);
+
+    // --- copy day ---
+    const copyTarget = "2099-06-20";
+    for (const payload of [
+      { source_date: sharedDate, target_date: sharedDate },
+      { source_date: "not-a-date", target_date: copyTarget },
+    ]) {
+      const invalid = await app.inject({
+        method: "POST",
+        url: "/api/todos/copy",
+        headers: headers(tokenA),
+        payload,
+      });
+      assert.equal(invalid.statusCode, 400);
+    }
+
+    const copied = await app.inject({
+      method: "POST",
+      url: "/api/todos/copy",
+      headers: headers(tokenA),
+      payload: { source_date: sharedDate, target_date: copyTarget },
+    });
+    assert.equal(copied.statusCode, 200);
+    assert.equal(copied.json().copied, 1);
+    assert.ok(copied.json().items.every((item: { isDone: boolean; dateKey: string }) =>
+      item.isDone === false && item.dateKey === copyTarget,
+    ));
+    const copiedTitles = copied.json().items.map((item: { title: string }) => item.title).sort();
+    assert.deepEqual(copiedTitles, [`${runPrefix}-todo-a`]);
+
+    const crossCopy = await app.inject({
+      method: "POST",
+      url: "/api/todos/copy",
+      headers: headers(tokenB),
+      payload: { source_date: bookAOnlyDate, target_date: copyTarget },
+    });
+    assert.equal(crossCopy.statusCode, 200);
+    assert.equal(crossCopy.json().copied, 0);
+
+    // --- calendar ---
+    const calendarA = await app.inject({
+      method: "GET",
+      url: "/api/calendar",
+      headers: headers(tokenA),
+    });
+    assert.equal(calendarA.statusCode, 200);
+    const calendarDays = calendarA.json().days as Array<{
+      date: string;
+      total: number;
+      done: number;
+      hasNotes: boolean;
+      level: string;
+    }>;
+    const byDate = new Map(calendarDays.map((day) => [day.date, day]));
+    assert.deepEqual(byDate.get(sharedDate), {
+      date: sharedDate,
+      total: 1,
+      done: 0,
+      hasNotes: true,
+      level: "low",
+    });
+    assert.deepEqual(byDate.get(bookAOnlyDate), {
+      date: bookAOnlyDate,
+      total: 1,
+      done: 0,
+      hasNotes: false,
+      level: "low",
+    });
+    assert.deepEqual(byDate.get(copyTarget), {
+      date: copyTarget,
+      total: 1,
+      done: 0,
+      hasNotes: false,
+      level: "low",
+    });
+    assert.equal(byDate.has(bookBOnlyDate), false);
+
+    const calendarB = await app.inject({
+      method: "GET",
+      url: "/api/calendar",
+      headers: headers(tokenB),
+    });
+    const calendarBDates = calendarB.json().days.map((day: { date: string }) => day.date);
+    assert.deepEqual(calendarBDates, [sharedDate, bookBOnlyDate]);
+
+    assert.equal(completionLevel(0, 0), "none");
+    assert.equal(completionLevel(4, 5), "high");
+    assert.equal(completionLevel(2, 5), "medium");
+    assert.equal(completionLevel(1, 5), "low");
   } finally {
     await queryWithRetry("DELETE FROM books WHERE id = ANY($1::uuid[])", [[bookA, bookB]]);
     await app.close();
